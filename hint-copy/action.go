@@ -1,9 +1,17 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"strings"
 )
+
+// envLayout carries the tab layout captured BEFORE the overlay opens. Once
+// the overlay exists, pane.layout reports it as a split of the launch pane
+// (shrinking the real pane's rect), so the pre-overlay snapshot is the only
+// correct source for compositing.
+const envLayout = "HINTCOPY_LAYOUT"
 
 // envTargetPane carries the launch pane's id into the overlay process. The
 // overlay's own HERDR_PANE_ID is the overlay pane itself, so the original
@@ -44,6 +52,11 @@ func runAction(mode string) {
 	env := map[string]string{envTargetPane: paneID}
 	if mode == "copy" {
 		env["HINTCOPY_MODE"] = "copy"
+	}
+	if lay, lerr := client.paneLayout(paneID); lerr == nil && len(lay.Panes) >= 2 {
+		if data, merr := json.Marshal(lay); merr == nil {
+			env[envLayout] = base64.StdEncoding.EncodeToString(data)
+		}
 	}
 	// Overlay panes always anchor to the active pane; herdr rejects an
 	// explicit target_pane_id here. The pane to read still travels via env.

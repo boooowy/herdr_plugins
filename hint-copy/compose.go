@@ -22,20 +22,24 @@ type composite struct {
 	styled map[string][][]Cell // pane id → styled lines
 }
 
-// buildComposite captures the tab. It returns nil — meaning "fall back to
-// the plain full-screen frame" — when the tab has a single pane, the layout
-// call fails, or the overlay's terminal size doesn't match the measured
-// area-minus-border relation (dw/dh of 2-3 cells; anything else means the
-// geometry assumptions don't hold on this setup).
-func buildComposite(client *herdrClient, targetID string, w, h int, cfg Config, tbl *styleTable) *composite {
-	lay, err := client.paneLayout(targetID)
-	if err != nil || len(lay.Panes) < 2 {
+// buildComposite captures the tab from the pre-overlay layout snapshot (the
+// action recorded it before opening the overlay — reading pane.layout from
+// inside the overlay reports the overlay as a split and halves the launch
+// pane's rect). It returns nil — meaning "fall back to the plain full-screen
+// frame" — when no usable snapshot exists or the overlay's terminal size
+// doesn't match the measured area-minus-border relation (dw/dh of 1-4
+// cells).
+func buildComposite(client *herdrClient, lay *paneLayoutResult, targetID string, w, h int, cfg Config, tbl *styleTable) *composite {
+	if lay == nil || len(lay.Panes) < 2 {
+		debugf("composite: nil (no layout snapshot, panes=%d)", layPaneCount(lay))
 		return nil
 	}
 	dw, dh := lay.Area.Width-w, lay.Area.Height-h
 	if dw < 1 || dw > 4 || dh < 1 || dh > 4 {
+		debugf("composite: nil (size mismatch term=%dx%d area=%dx%d)", w, h, lay.Area.Width, lay.Area.Height)
 		return nil
 	}
+	debugf("composite: ok term=%dx%d area=%dx%d panes=%d rects=%v", w, h, lay.Area.Width, lay.Area.Height, len(lay.Panes), lay.Panes)
 	// Overlay content origin in absolute screen coordinates.
 	ox, oy := lay.Area.X+1, lay.Area.Y+1
 
@@ -140,3 +144,10 @@ func clearRect(s *Screen, r Rect) {
 
 // joinPlain reassembles the plain text of parsed lines.
 func joinPlain(lines []string) string { return strings.Join(lines, "\n") }
+
+func layPaneCount(lay *paneLayoutResult) int {
+	if lay == nil {
+		return -1
+	}
+	return len(lay.Panes)
+}

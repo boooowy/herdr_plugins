@@ -4,7 +4,24 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
+
+// debugf appends a timestamped line to /tmp/hintcopy-debug.log, but only
+// when that file already exists (`touch` it to enable, remove to disable) —
+// the overlay runs server-side with no visible stderr, so this is the only
+// way to observe startup behavior in a real herdr session.
+func debugf(format string, args ...any) {
+	if _, err := os.Stat("/tmp/hintcopy-debug.log"); err != nil {
+		return
+	}
+	f, err := os.OpenFile("/tmp/hintcopy-debug.log", os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s [%d] %s\n", time.Now().Format("15:04:05.000"), os.Getpid(), fmt.Sprintf(format, args...))
+}
 
 // runFrame is a development helper (`hint-copy frame <w> <h>`): it builds the
 // composite for HINTCOPY_TARGET_PANE_ID and prints one token-mode frame to
@@ -26,7 +43,11 @@ func runFrame(args []string) {
 	}
 	cfg := loadConfig()
 	tbl := newStyleTable()
-	comp := buildComposite(client, target, w, h, cfg, tbl)
+	lay, lerr := client.paneLayout(target)
+	if lerr != nil {
+		errExit("layout:", lerr)
+	}
+	comp := buildComposite(client, lay, target, w, h, cfg, tbl)
 	if comp == nil {
 		fmt.Println("composite: nil (would fall back to full-screen)")
 		return
