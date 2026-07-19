@@ -10,23 +10,6 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// styles holds the precomputed SGR sequences for one frame.
-type styles struct {
-	hint  string // the label cells
-	match string // the rest of the matched text
-	dim   string // labels ruled out by the typed prefix, footer
-	reset string
-}
-
-func makeStyles(cfg Config) styles {
-	return styles{
-		hint:  "\x1b[1;" + colorCode(cfg.HintFg, false) + ";" + colorCode(cfg.HintBg, true) + "m",
-		match: "\x1b[" + colorCode(cfg.MatchFg, false) + "m",
-		dim:   "\x1b[2m",
-		reset: "\x1b[0m",
-	}
-}
-
 // colorCode maps a color name or a 0-255 number to an SGR parameter.
 func colorCode(name string, bg bool) string {
 	named := map[string]int{
@@ -55,10 +38,9 @@ func colorCode(name string, bg bool) string {
 	return "39"
 }
 
-// viewWindow decides which slice of the captured lines fits the overlay: one
-// row is reserved for the footer, and when the capture is taller than the
-// view the bottom lines win. Renderers and the UI share it so they agree on
-// what is visible.
+// viewWindow decides which slice of the captured lines fits a view of the
+// given height (one row already excluded for the footer by callers): when
+// the capture is taller, the bottom lines win.
 func viewWindow(nLines, height int) (offset, view int) {
 	view = height - 1
 	if view < 1 {
@@ -70,110 +52,243 @@ func viewWindow(nLines, height int) (offset, view int) {
 	return offset, view
 }
 
-// Render paints one full frame: the captured screen with hint labels replacing
-// the leading cells of each candidate (tmux-thumbs style), plus a footer.
-// Lines are emitted top-to-bottom in full, so wide/CJK characters keep their
-// natural alignment without any column bookkeeping across the frame.
-func Render(w io.Writer, screen string, cands []Candidate, lm *LabelMap, prefix string, width, height int, cfg Config) {
-	st := makeStyles(cfg)
-	lines := strings.Split(screen, "\n")
-	offset, view := viewWindow(len(lines), height)
+// PaintTokens draws the captured text into r with hint labels replacing the
+// leading cells of each candidate (tmux-thumbs style). Lines render fully
+// left-to-right so wide/CJK characters keep natural alignment; the bottom
+// lines win when the capture is taller than the rect.
+func PaintTokens(s *Screen, r Rect, text string, cands []Candidate, lm *LabelMap, prefix string) {
+	lines := strings.Split(text, "\n")
+	offset := 0
+	if len(lines) > r.H {
+		offset = len(lines) - r.H
+	}
 	byLine := make(map[int][]Candidate)
 	for _, c := range cands {
 		if c.Line >= offset {
 			byLine[c.Line-offset] = append(byLine[c.Line-offset], c)
 		}
 	}
-
-	var sb strings.Builder
-	sb.WriteString("\x1b[H")
-	shown := lines[offset:]
-	for li := 0; li < view; li++ {
-		if li < len(shown) {
-			renderLine(&sb, shown[li], byLine[li], lm, prefix, width, st)
-		}
-		sb.WriteString("\x1b[K\r\n")
+	for li := 0; li < r.H && offset+li < len(lines); li++ {
+		paintTokenLine(s, r, li, lines[offset+li], byLine[li], lm, prefix)
 	}
-	if height >= 2 {
-		footer := " type a label to copy · space: line mode · ? help · esc to cancel"
-		if prefix != "" {
-			footer = " " + prefix + "_ ·" + footer
-		}
-		sb.WriteString(st.dim)
-		sb.WriteString(runewidth.Truncate(footer, width, ""))
-		sb.WriteString(st.reset)
-	}
-	sb.WriteString("\x1b[K")
-	io.WriteString(w, sb.String())
 }
 
-// RenderLines paints a line-mode frame: every non-empty line gets its hint
-// label in a uniform left margin (content shifts right, so columns across
-// lines stay aligned), the anchor line is shown in inverse video, and the
-// footer explains the pending state. It is deliberately separate from Render:
-// token mode substitutes labels in place, line mode adds a margin — the two
-// share almost no drawing logic.
-func RenderLines(w io.Writer, screen string, ll *LineLabels, prefix string, anchor, width, height int, cfg Config) {
-	st := makeStyles(cfg)
-	lines := strings.Split(screen, "\n")
-	offset, view := viewWindow(len(lines), height)
+// paintTokenLine draws one line at rect row li, overlaying candidate labels.
+// lineCands are sorted by StartRune and non-overlapping (Extract guarantees
+// both); candidate text is ASCII, so a label replaces exactly its rune count.
+func paintTokenLine(s *Screen, r Rect, li int, line string, lineCands []Candidate, lm *LabelMap, prefix string) {
+	runes := []rune(line)
+	maxX := r.X + r.W
+	y := r.Y + li
+	x := r.X
+	i, ci := 0, 0
+	for i < len(runes) && x < maxX {
+		for ci < len(lineCands) && lineCands[ci].StartRune < i {
+			ci++
+		}
+		if ci < len(lineCands) && lineCands[ci].StartRune == i {
+			c := lineCands[ci]
+			ci++
+			matchLen := c.EndRune - c.StartRune
+			j := i
+			if label := lm.LabelFor(c.Text); label != "" {
+				labelStyle := styleHint
+				if prefix != "" && !strings.HasPrefix(label, prefix) {
+					labelStyle = styleDim
+				}
+				skipped := 0
+				for _, lr := range label {
+					if x >= maxX {
+						break
+					}
+					s.Set(x, y, lr, labelStyle)
+					x++
+					if skipped < matchLen {
+						skipped++
+					}
+				}
+				j = i + skipped
+			}
+			for ; j < i+matchLen && j < len(runes); j++ {
+				wdt := runewidth.RuneWidth(runes[j])
+				if x+wdt > maxX {
+					break
+				}
+				s.Set(x, y, runes[j], styleMatch)
+				x += wdt
+			}
+			i += matchLen
+			continue
+		}
+		if runes[i] != '\r' {
+			wdt := runewidth.RuneWidth(runes[i])
+			if x+wdt > maxX {
+				break
+			}
+			s.Set(x, y, runes[i], styleNone)
+			x += wdt
+		}
+		i++
+	}
+}
+
+// PaintLineMode draws line-mode hints into r: a uniform left margin holds
+// each non-empty line's label, content shifts right, the anchor line renders
+// in inverse video.
+func PaintLineMode(s *Screen, r Rect, text string, ll *LineLabels, prefix string, anchor int) {
+	lines := strings.Split(text, "\n")
+	offset := 0
+	if len(lines) > r.H {
+		offset = len(lines) - r.H
+	}
 	margin := 0
 	if ll.Width() > 0 {
 		margin = ll.Width() + 1
 	}
-
-	var sb strings.Builder
-	sb.WriteString("\x1b[H")
-	for li := 0; li < view; li++ {
+	maxX := r.X + r.W
+	for li := 0; li < r.H && offset+li < len(lines); li++ {
 		abs := offset + li
-		if abs < len(lines) {
-			line := lines[abs]
-			label := ll.LabelFor(abs)
-			isAnchor := abs == anchor
-			if isAnchor {
-				sb.WriteString("\x1b[7m")
+		y := r.Y + li
+		line := lines[abs]
+		label := ll.LabelFor(abs)
+		isAnchor := abs == anchor
+		contentStyle := styleNone
+		if isAnchor {
+			contentStyle = styleInverse
+		}
+		x := r.X
+		if label != "" {
+			labelStyle := styleHint
+			if prefix != "" && !strings.HasPrefix(label, prefix) {
+				labelStyle = styleDim
 			}
-			if label != "" {
-				style := st.hint
-				if prefix != "" && !strings.HasPrefix(label, prefix) {
-					style = st.dim
-				}
-				sb.WriteString(style)
-				sb.WriteString(label)
-				sb.WriteString(st.reset)
-				if isAnchor {
-					sb.WriteString("\x1b[7m")
-				}
-				sb.WriteString(strings.Repeat(" ", margin-len(label)))
-			}
-			// Unlabeled lines are exactly the blank ones — no margin needed.
-			writeClipped(&sb, line, width-margin)
-			if isAnchor {
-				sb.WriteString(st.reset)
+			x = s.WriteString(x, y, label, labelStyle, maxX)
+			for ; x < r.X+margin && x < maxX; x++ {
+				s.Set(x, y, ' ', contentStyle)
 			}
 		}
-		sb.WriteString("\x1b[K\r\n")
-	}
-	if height >= 2 {
-		footer := " line mode: type a label · space: token mode · ? help · esc to cancel"
-		if anchor >= 0 {
-			footer = " enter/same label: copy this line · another label: copy range · esc: cancel"
-		} else if prefix != "" {
-			footer = " " + prefix + "_ ·" + footer
+		x = s.WriteString(x, y, line, contentStyle, maxX)
+		if isAnchor { // extend the highlight across the rect width
+			for ; x < maxX; x++ {
+				s.Set(x, y, ' ', styleInverse)
+			}
 		}
-		sb.WriteString(st.dim)
-		sb.WriteString(runewidth.Truncate(footer, width, ""))
-		sb.WriteString(st.reset)
 	}
-	sb.WriteString("\x1b[K")
-	io.WriteString(w, sb.String())
 }
 
-// RenderHelp paints the in-overlay help screen: the key reference for both
-// modes plus the pattern inventory with its current on/off state (so what the
-// user sees reflects their config, not just the defaults).
-func RenderHelp(w io.Writer, width, height int, cfg Config) {
-	st := makeStyles(cfg)
+// PaintCopyMode draws the copy-mode viewport into r: buffer lines, search
+// highlights, the selection, and the cursor.
+func PaintCopyMode(s *Screen, r Rect, cs *CopyState) {
+	for row := 0; row < r.H; row++ {
+		li := cs.Top + row
+		if li >= len(cs.Buf) {
+			break
+		}
+		s.WriteString(r.X, r.Y+row, string(cs.Buf[li]), styleNone, r.X+r.W)
+	}
+	if cs.Search.QueryLen > 0 {
+		for _, m := range cs.Search.Matches {
+			styleSpan(s, r, cs, m.Line, m.Col, m.Col+cs.Search.QueryLen-1, styleSearch)
+		}
+	}
+	if cs.Sel != nil {
+		a, b := cs.Sel.Anchor, cs.Cur
+		if a.Line > b.Line || (a.Line == b.Line && a.Col > b.Col) {
+			a, b = b, a
+		}
+		for li := a.Line; li <= b.Line; li++ {
+			c1, c2 := 0, len(cs.Buf[li])-1
+			if !cs.Sel.Linewise {
+				if li == a.Line {
+					c1 = a.Col
+				}
+				if li == b.Line {
+					c2 = b.Col
+				}
+			}
+			styleSpan(s, r, cs, li, c1, c2, styleSel)
+		}
+	}
+	styleSpan(s, r, cs, cs.Cur.Line, cs.Cur.Col, cs.Cur.Col, styleCursor)
+	if len(cs.Buf[cs.Cur.Line]) == 0 { // empty line: paint a cursor cell
+		if row := cs.Cur.Line - cs.Top; row >= 0 && row < r.H {
+			s.Set(r.X, r.Y+row, ' ', styleCursor)
+		}
+	}
+}
+
+// styleSpan restyles the rune-index range [c1, c2] of buffer line li,
+// walking display widths so CJK text highlights the right cells.
+func styleSpan(s *Screen, r Rect, cs *CopyState, li, c1, c2 int, st StyleID) {
+	row := li - cs.Top
+	if row < 0 || row >= r.H {
+		return
+	}
+	y := r.Y + row
+	x := r.X
+	for i, ch := range cs.Buf[li] {
+		wdt := runewidth.RuneWidth(ch)
+		if x+wdt > r.X+r.W {
+			return
+		}
+		if i >= c1 && i <= c2 {
+			s.SetStyle(x, y, st)
+			if wdt == 2 {
+				s.SetStyle(x+1, y, st)
+			}
+		}
+		x += wdt
+	}
+}
+
+// copyFooter renders the copy-mode status line.
+func copyFooter(cs *CopyState) string {
+	if cs.Search.Typing {
+		pre := "/"
+		if cs.Search.Backward {
+			pre = "?"
+		}
+		return " " + pre + cs.Search.Query + "_"
+	}
+	pct := 100
+	if len(cs.Lines) > 0 {
+		pct = (cs.Cur.Line + 1) * 100 / len(cs.Lines)
+	}
+	sel := ""
+	if cs.Sel != nil {
+		sel = "V"
+		if !cs.Sel.Linewise {
+			sel = "v"
+		}
+		sel = " · -- " + sel + " --"
+	}
+	f := fmt.Sprintf(" copy · %d%%%s · v/V:select · y:copy · /:search · q/esc:quit", pct, sel)
+	if cs.Msg != "" {
+		f = " " + cs.Msg + " ·" + f
+	}
+	if cs.Trunc {
+		f += " · scrollback capped"
+	}
+	return f
+}
+
+// PaintFooter writes the dim status line into the screen's bottom row,
+// clearing it first (in composite mode the base frame has pane content
+// there).
+func PaintFooter(s *Screen, msg string) {
+	if s.H < 2 {
+		return
+	}
+	y := s.H - 1
+	for x := 0; x < s.W; x++ {
+		s.Set(x, y, ' ', styleNone)
+	}
+	s.WriteString(0, y, msg, styleDim, s.W)
+}
+
+// helpLines builds the help screen content: key reference plus the pattern
+// inventory with its current on/off state from the user's config.
+func helpLines(cfg Config) []string {
 	var lines []string
 	add := func(s string) { lines = append(lines, s) }
 
@@ -182,18 +297,22 @@ func RenderHelp(w io.Writer, width, height int, cfg Config) {
 	add(" token mode (URLs, paths, ...)")
 	add("   a s d ...      copy the labeled string")
 	add("   space          switch to line mode")
+	add("   [              copy mode")
 	add(" line mode (whole lines)")
 	add("   label          select the anchor line")
 	add("   enter / same   copy the anchor line")
 	add("   other label    copy the range between the two lines")
+	add(" copy mode ( [ or the copy-mode action; scrollback included )")
+	add("   h j k l / arrows  move      w b e  words     { }  paragraphs")
+	add("   0 ^ $   line      g G  top/bottom   ctrl+f/b page  ctrl+u/d half")
+	add("   v/space select    V  line select    y/enter  copy")
+	add("   / ?     search    n N  next/prev    q/esc    quit")
 	add(" anywhere")
 	add("   esc / ctrl-c   cancel")
-	add("   ?              this help (any key returns)")
+	add("   ?              this help in token/line mode (any key returns)")
 	add("")
 	add(" patterns — toggle in " + configPathHint())
 
-	// Built-in patterns in priority order (dedup shared names like quoted),
-	// then custom ones, packed three per row.
 	var entries []string
 	seen := make(map[string]bool)
 	for _, p := range builtinPatterns {
@@ -217,23 +336,7 @@ func RenderHelp(w io.Writer, width, height int, cfg Config) {
 		}
 		add(row)
 	}
-
-	var sb strings.Builder
-	sb.WriteString("\x1b[H")
-	_, view := viewWindow(len(lines), height)
-	for li := 0; li < view; li++ {
-		if li < len(lines) {
-			writeClipped(&sb, lines[li], width)
-		}
-		sb.WriteString("\x1b[K\r\n")
-	}
-	if height >= 2 {
-		sb.WriteString(st.dim)
-		sb.WriteString(runewidth.Truncate(" press any key to return", width, ""))
-		sb.WriteString(st.reset)
-	}
-	sb.WriteString("\x1b[K")
-	io.WriteString(w, sb.String())
+	return lines
 }
 
 // configPathHint names the config file location for the help screen, using
@@ -245,79 +348,57 @@ func configPathHint() string {
 	return "$HERDR_PLUGIN_CONFIG_DIR/config.toml"
 }
 
-// writeClipped emits line runes up to maxWidth display columns, skipping \r.
-func writeClipped(sb *strings.Builder, line string, maxWidth int) {
-	col := 0
-	for _, r := range line {
-		if r == '\r' {
-			continue
-		}
-		wdt := runewidth.RuneWidth(r)
-		if col+wdt > maxWidth {
-			return
-		}
-		sb.WriteRune(r)
-		col += wdt
+// PaintHelp draws the help content into r (top lines win — help is short).
+func PaintHelp(s *Screen, r Rect, cfg Config) {
+	lines := helpLines(cfg)
+	for li := 0; li < r.H && li < len(lines); li++ {
+		s.WriteString(r.X, r.Y+li, lines[li], styleNone, r.X+r.W)
 	}
 }
 
-// renderLine emits one screen line, overlaying each candidate's label over the
-// first cells of its match. lineCands must be sorted by StartRune and
-// non-overlapping (Extract guarantees both). Candidate text is ASCII by
-// construction, so replacing N leading runes costs exactly N columns.
-func renderLine(sb *strings.Builder, line string, lineCands []Candidate, lm *LabelMap, prefix string, width int, st styles) {
-	runes := []rune(line)
-	col, i, ci := 0, 0, 0
-	for i < len(runes) && col < width {
-		for ci < len(lineCands) && lineCands[ci].StartRune < i {
-			ci++
-		}
-		if ci < len(lineCands) && lineCands[ci].StartRune == i {
-			c := lineCands[ci]
-			ci++
-			matchLen := c.EndRune - c.StartRune
-			j := i
-			if label := lm.LabelFor(c.Text); label != "" {
-				labelStyle := st.hint
-				if prefix != "" && !strings.HasPrefix(label, prefix) {
-					labelStyle = st.dim
-				}
-				sb.WriteString(labelStyle)
-				skipped := 0
-				for _, lr := range label {
-					if col >= width {
-						break
-					}
-					sb.WriteRune(lr)
-					col++
-					if skipped < matchLen {
-						skipped++
-					}
-				}
-				sb.WriteString(st.reset)
-				j = i + skipped
-			}
-			sb.WriteString(st.match)
-			for ; j < i+matchLen && j < len(runes); j++ {
-				wdt := runewidth.RuneWidth(runes[j])
-				if col+wdt > width {
-					break
-				}
-				sb.WriteRune(runes[j])
-				col += wdt
-			}
-			sb.WriteString(st.reset)
-			i += matchLen
-			continue
-		}
-		wdt := runewidth.RuneWidth(runes[i])
-		if col+wdt > width {
-			break
-		}
-		if runes[i] != '\r' {
-			sb.WriteRune(runes[i])
-			col += wdt
-		}
-		i++
+// ---- full-screen wrappers (kept signatures; used by the fallback path and
+// the tests, which assert on their SGR-stripped output) ----
+
+func tokenFooter(prefix string) string {
+	footer := " type a label to copy · space: line mode · ? help · esc to cancel"
+	if prefix != "" {
+		footer = " " + prefix + "_ ·" + footer
 	}
+	return footer
+}
+
+func lineFooter(prefix string, anchor int) string {
+	footer := " line mode: type a label · space: token mode · ? help · esc to cancel"
+	if anchor >= 0 {
+		footer = " enter/same label: copy this line · another label: copy range · esc: cancel"
+	} else if prefix != "" {
+		footer = " " + prefix + "_ ·" + footer
+	}
+	return footer
+}
+
+// Render paints one full-screen token-mode frame.
+func Render(w io.Writer, screen string, cands []Candidate, lm *LabelMap, prefix string, width, height int, cfg Config) {
+	s := NewScreen(width, height)
+	_, view := viewWindow(len(strings.Split(screen, "\n")), height)
+	PaintTokens(s, Rect{X: 0, Y: 0, W: width, H: view}, screen, cands, lm, prefix)
+	PaintFooter(s, tokenFooter(prefix))
+	s.Flush(w, sgrTable(cfg))
+}
+
+// RenderLines paints one full-screen line-mode frame.
+func RenderLines(w io.Writer, screen string, ll *LineLabels, prefix string, anchor, width, height int, cfg Config) {
+	s := NewScreen(width, height)
+	_, view := viewWindow(len(strings.Split(screen, "\n")), height)
+	PaintLineMode(s, Rect{X: 0, Y: 0, W: width, H: view}, screen, ll, prefix, anchor)
+	PaintFooter(s, lineFooter(prefix, anchor))
+	s.Flush(w, sgrTable(cfg))
+}
+
+// RenderHelp paints the full-screen help frame.
+func RenderHelp(w io.Writer, width, height int, cfg Config) {
+	s := NewScreen(width, height)
+	PaintHelp(s, Rect{X: 0, Y: 0, W: width, H: height - 1}, cfg)
+	PaintFooter(s, " press any key to return")
+	s.Flush(w, sgrTable(cfg))
 }

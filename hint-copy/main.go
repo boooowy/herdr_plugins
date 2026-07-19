@@ -11,7 +11,7 @@ import (
 	"os"
 )
 
-const version = "0.3.0"
+const version = "0.4.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -19,9 +19,15 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "action":
-		runAction()
+		mode := ""
+		if len(os.Args) > 2 {
+			mode = os.Args[2]
+		}
+		runAction(mode)
 	case "ui":
 		runUI()
+	case "frame": // dev helper: print one composite frame
+		runFrame(os.Args[2:])
 	case "version":
 		fmt.Println("hint-copy " + version)
 	default:

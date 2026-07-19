@@ -18,6 +18,9 @@ type Config struct {
 	HintFg        string          `toml:"hint_fg"`
 	HintBg        string          `toml:"hint_bg"`
 	MatchFg       string          `toml:"match_fg"`
+	SelBg         string          `toml:"sel_bg"`
+	SearchBg      string          `toml:"search_bg"`
+	ScrollbackLines int           `toml:"scrollback_lines"`
 	Patterns      map[string]bool `toml:"patterns"`
 	CustomPatterns []CustomPattern `toml:"custom_patterns"`
 
@@ -36,11 +39,14 @@ type CustomPattern struct {
 
 func defaultConfig() Config {
 	return Config{
-		Alphabet:      "asdfghjklqwertyuiopzxcvb",
-		MaxCandidates: 100,
-		HintFg:        "black",
-		HintBg:        "yellow",
-		MatchFg:       "green",
+		Alphabet:        "asdfghjklqwertyuiopzxcvb",
+		MaxCandidates:   100,
+		HintFg:          "black",
+		HintBg:          "yellow",
+		MatchFg:         "green",
+		SelBg:           "blue",
+		SearchBg:        "magenta",
+		ScrollbackLines: 5000,
 	}
 }
 
@@ -66,6 +72,9 @@ func loadConfig() Config {
 	}
 	if cfg.MaxCandidates <= 0 {
 		cfg.MaxCandidates = defaultConfig().MaxCandidates
+	}
+	if cfg.ScrollbackLines <= 0 {
+		cfg.ScrollbackLines = defaultConfig().ScrollbackLines
 	}
 	return cfg
 }

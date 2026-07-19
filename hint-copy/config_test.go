@@ -12,6 +12,9 @@ func TestLoadConfigDefaultsWhenUnset(t *testing.T) {
 	if cfg.Alphabet == "" || cfg.MaxCandidates != 100 || cfg.HintBg != "yellow" {
 		t.Errorf("bad defaults: %+v", cfg)
 	}
+	if cfg.ScrollbackLines != 5000 || cfg.SelBg != "blue" || cfg.SearchBg != "magenta" {
+		t.Errorf("bad copy-mode defaults: %+v", cfg)
+	}
 	if !cfg.patternEnabled("url") || cfg.patternEnabled("ipv6") {
 		t.Error("default pattern toggles wrong")
 	}

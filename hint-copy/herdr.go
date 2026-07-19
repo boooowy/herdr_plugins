@@ -118,6 +118,63 @@ func (c *herdrClient) focusedPaneID() (string, error) {
 	return "", errors.New("no focused pane")
 }
 
+// layoutRect is a pane/tab rectangle in absolute terminal cells (herdr's
+// sidebar and tab bar offset x/y; rects tile the tab area exactly, with each
+// pane drawing its 1-cell border ring inside its own rect).
+type layoutRect struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+// paneLayoutResult is the tab geometry snapshot for a pane's tab.
+type paneLayoutResult struct {
+	Zoomed        bool       `json:"zoomed"`
+	Area          layoutRect `json:"area"`
+	FocusedPaneID string     `json:"focused_pane_id"`
+	Panes         []struct {
+		PaneID  string     `json:"pane_id"`
+		Focused bool       `json:"focused"`
+		Rect    layoutRect `json:"rect"`
+	} `json:"panes"`
+}
+
+// paneLayout returns the layout of the tab containing paneID.
+func (c *herdrClient) paneLayout(paneID string) (*paneLayoutResult, error) {
+	var out struct {
+		Layout paneLayoutResult `json:"layout"`
+	}
+	err := c.call("pane.layout", map[string]any{"pane_id": paneID}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out.Layout, nil
+}
+
+// paneReadLines is paneRead with a trailing-lines cap, reporting whether the
+// cap truncated older history (used for the copy-mode scrollback read).
+func (c *herdrClient) paneReadLines(paneID, source string, lines int) (string, bool, error) {
+	var out struct {
+		Read struct {
+			Text      string `json:"text"`
+			Truncated bool   `json:"truncated"`
+		} `json:"read"`
+	}
+	params := map[string]any{
+		"pane_id": paneID,
+		"source":  source,
+	}
+	if lines > 0 {
+		params["lines"] = lines
+	}
+	err := c.call("pane.read", params, &out)
+	if err != nil {
+		return "", false, err
+	}
+	return out.Read.Text, out.Read.Truncated, nil
+}
+
 // notify shows a toast notification inside herdr. sound is one of
 // "none", "done", "request".
 func (c *herdrClient) notify(title, body, sound string) error {

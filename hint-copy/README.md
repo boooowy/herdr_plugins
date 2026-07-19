@@ -1,6 +1,8 @@
 # hint-copy
 
-herdr の画面に表示されている文字列を、キーボードだけでクリップボードにコピーする herdr プラグイン。tmux-thumbs / vimium のヒントラベル方式。行単位・範囲のコピー(行モード)にも対応。
+herdr の画面に表示されている文字列を、キーボードだけでクリップボードにコピーする herdr プラグイン。tmux-thumbs / vimium のヒントラベル方式。行単位・範囲のコピー(行モード)、vim風のカーソル選択+スクロールバック(copyモード)にも対応。
+
+分割レイアウトでは**タブ全体を合成再現**するので、起動してもペインの位置は動いて見えません(対象ペインにラベルが現れるだけ)。罫線の色はテーマの近似です。
 
 ```
 ┌─ overlay ──────────────────────────────┐
@@ -34,6 +36,12 @@ key = "prefix+y"
 type = "plugin_action"
 command = "kayakatu.hint-copy.copy"
 description = "hint-copy: pick and copy"
+
+[[keys.command]]
+key = "cmd+alt+8"
+type = "plugin_action"
+command = "kayakatu.hint-copy.copy-mode"
+description = "hint-copy: copy mode (scrollback)"
 ```
 
 ## 操作
@@ -42,7 +50,8 @@ description = "hint-copy: pick and copy"
 |---|---|
 | ラベル(a, s, d, ...) | その候補をコピーして閉じる。候補が25個以上のときは2文字ラベル |
 | Space | トークンモード ⇔ 行モードの切替 |
-| ? | ヘルプ表示(キー操作と、設定を反映したパターン一覧。任意のキーで戻る) |
+| [ | copyモードに入る(予約キー) |
+| ? | ヘルプ表示(トークン/行モードのみ。任意のキーで戻る) |
 | Esc / Ctrl-C | キャンセル |
 | その他のキー | 入力中のラベルをリセット |
 
@@ -59,6 +68,28 @@ description = "hint-copy: pick and copy"
 | 別のラベル | アンカーからその行までの**範囲**をコピー(インデント・途中の空行は保持) |
 
 URL等の候補が1つも無い画面では、最初から行モードで開きます。
+
+### copyモード(vim風選択+スクロールバック)
+
+オーバーレイ内で `[`、または `kayakatu.hint-copy.copy-mode` アクション(キーバインド例: `cmd+alt+8`)で直接起動。herdr 本体の copy モードと同じキー感覚で、スクロールバック(既定5000行、`scrollback_lines` で変更可)を遡ってコピーできます。
+
+| キー | 動作 |
+|---|---|
+| h j k l / 矢印 | カーソル移動 |
+| w / b / e | 単語移動(行を跨ぐ) |
+| { / } | 段落(空行)単位の移動 |
+| 0 / ^ / $ | 行頭 / 最初の非空白 / 行末 |
+| g / G | バッファ先頭 / 末尾 |
+| Ctrl+f / Ctrl+b | 1ページ移動 |
+| Ctrl+u / Ctrl+d | 半ページ移動 |
+| v / Space | 文字単位の選択開始・解除 |
+| V | 行単位の選択開始・解除 |
+| y / Enter | 選択範囲をコピーして閉じる(選択が必要) |
+| / と ? | 前方 / 後方検索(リテラル・smart-case、インクリメンタル) |
+| n / N | 次 / 前のマッチへ(ラップアラウンド) |
+| q / Esc | 終了(Esc は 検索入力 → 選択 → 検索ハイライト を先に解除する段階式) |
+
+copyモード中の `?` は後方検索です(ヘルプはトークン/行モードの `?` から)。
 
 ## 抽出パターン
 
@@ -94,6 +125,9 @@ alphabet = "asdfghjklqwertyuiopzxcvb"  # ラベルに使うキー(ホームロ�
 reverse = false        # true: 画面下(プロンプト近く)の候補に早いラベルを割当
 osc52 = false          # OSC 52 も /dev/tty に出力(SSH先のクリップボード用)
 max_candidates = 100   # ユニーク候補の上限
+scrollback_lines = 5000  # copyモードで遡れる行数
+sel_bg = "blue"        # copyモードの選択範囲の背景色
+search_bg = "magenta"  # copyモードの検索マッチの背景色
 hint_fg = "black"      # ラベル色(色名 or 0-255)
 hint_bg = "yellow"
 match_fg = "green"
