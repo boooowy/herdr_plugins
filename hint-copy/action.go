@@ -1,0 +1,57 @@
+package main
+
+import "os"
+
+// envTargetPane carries the launch pane's id into the overlay process. The
+// overlay's own HERDR_PANE_ID is the overlay pane itself, so the original
+// pane must travel explicitly.
+const envTargetPane = "HINTCOPY_TARGET_PANE_ID"
+
+const pluginID = "kayakatu.hint-copy"
+
+// runAction is the keybinding entrypoint. It runs server-side (no terminal):
+// resolve the focused pane, make sure there is something to copy, then ask
+// herdr to open the hints overlay anchored over that pane.
+func runAction() {
+	client, err := newHerdrClient()
+	if err != nil {
+		errExit(err)
+	}
+	paneID := resolveTargetPane(client)
+	if paneID == "" {
+		errExit("could not resolve the focused pane")
+	}
+
+	// Pre-check: with no candidates on screen, a toast beats an empty overlay.
+	text, err := client.paneRead(paneID, "visible")
+	if err != nil {
+		errExit("read pane:", err)
+	}
+	cfg := loadConfig()
+	if len(Extract(text, cfg)) == 0 {
+		client.notify("Hint Copy", "No candidates on screen", "none")
+		return
+	}
+
+	// Overlay panes always anchor to the active pane; herdr rejects an
+	// explicit target_pane_id here. The pane to read still travels via env.
+	err = client.pluginPaneOpen(pluginID, "hints", "overlay", "", true, map[string]string{
+		envTargetPane: paneID,
+	})
+	if err != nil {
+		errExit("open overlay:", err)
+	}
+}
+
+// resolveTargetPane picks the pane whose screen we hint: HERDR_PANE_ID when
+// herdr injected it, otherwise whichever pane is focused right now.
+func resolveTargetPane(client *herdrClient) string {
+	if id := os.Getenv("HERDR_PANE_ID"); id != "" {
+		return id
+	}
+	id, err := client.focusedPaneID()
+	if err != nil {
+		return ""
+	}
+	return id
+}

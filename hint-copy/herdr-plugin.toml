@@ -1,0 +1,20 @@
+id = "kayakatu.hint-copy"
+name = "Hint Copy"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "tmux-thumbs style hint copy: press a key, hit a hint label, and the URL/path/SHA/IP under it lands on your clipboard."
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["sh", "scripts/build.sh"]
+
+[[actions]]
+id = "copy"
+title = "Hint Copy: pick and copy"
+command = ["./bin/hint-copy", "action"]
+
+[[panes]]
+id = "hints"
+title = "Hint Copy"
+placement = "overlay"
+command = ["./bin/hint-copy", "ui"]
