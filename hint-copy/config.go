@@ -21,6 +21,8 @@ type Config struct {
 	SelBg         string          `toml:"sel_bg"`
 	SearchBg      string          `toml:"search_bg"`
 	ScrollbackLines int           `toml:"scrollback_lines"`
+	BorderFg      string          `toml:"border_fg"`       // composite pane borders
+	BorderFocusFg string          `toml:"border_focus_fg"` // target pane's border
 	Patterns      map[string]bool `toml:"patterns"`
 	CustomPatterns []CustomPattern `toml:"custom_patterns"`
 
@@ -47,6 +49,8 @@ func defaultConfig() Config {
 		SelBg:           "blue",
 		SearchBg:        "magenta",
 		ScrollbackLines: 5000,
+		BorderFg:        "#444477", // the user-facing docs call these out as
+		BorderFocusFg:   "#bd93f9", // theme approximations (dracula-ish)
 	}
 }
 

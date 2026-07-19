@@ -4,20 +4,22 @@ import "strings"
 
 // composite reproduces the whole tab inside the full-tab overlay so that
 // opening hint-copy does not appear to move any pane: every pane's visible
-// content is painted at its real position, and the hint interaction happens
-// only inside the target pane's content rect.
+// content is captured WITH its colors (ANSI read) and painted at its real
+// position, borders use the theme-ish colors (focused pane keeps its focus
+// color), and the hint interaction happens only inside the target pane's
+// content rect.
 //
 // Geometry (measured against herdr 0.7.4): pane rects tile the tab area
 // exactly in absolute terminal cells; each pane draws a 1-cell border ring
 // just inside its own rect, so its content is rect inset by 1. The overlay
 // itself is a zoomed pane with the same ring, so overlay-content coordinates
 // are screen coordinates minus (area + 1); the tab-perimeter borders fall
-// under the overlay's own border. Border colors are an approximation of the
-// user's theme (accepted trade-off).
+// under the overlay's own border.
 type composite struct {
-	base   *Screen           // static: every pane's content + borders
-	target Rect              // target pane's content region, overlay coords
-	texts  map[string]string // pane id → visible text (target's reused by ui)
+	base   *Screen             // static: every pane's colored content + borders
+	target Rect                // target pane's content region, overlay coords
+	plain  map[string][]string // pane id → plain lines (target's reused by ui)
+	styled map[string][][]Cell // pane id → styled lines
 }
 
 // buildComposite captures the tab. It returns nil — meaning "fall back to
@@ -25,7 +27,7 @@ type composite struct {
 // call fails, or the overlay's terminal size doesn't match the measured
 // area-minus-border relation (dw/dh of 2-3 cells; anything else means the
 // geometry assumptions don't hold on this setup).
-func buildComposite(client *herdrClient, targetID string, w, h int) *composite {
+func buildComposite(client *herdrClient, targetID string, w, h int, cfg Config, tbl *styleTable) *composite {
 	lay, err := client.paneLayout(targetID)
 	if err != nil || len(lay.Panes) < 2 {
 		return nil
@@ -38,15 +40,25 @@ func buildComposite(client *herdrClient, targetID string, w, h int) *composite {
 	ox, oy := lay.Area.X+1, lay.Area.Y+1
 
 	base := NewScreen(w, h)
-	texts := make(map[string]string, len(lay.Panes))
-	var target Rect
+	base.styles = tbl
+	titles := client.paneTitles()
+	borderSt := tbl.id(colorCode(cfg.BorderFg, false))
+	focusSt := tbl.id(colorCode(cfg.BorderFocusFg, false))
+
+	comp := &composite{
+		base:   base,
+		plain:  make(map[string][]string, len(lay.Panes)),
+		styled: make(map[string][][]Cell, len(lay.Panes)),
+	}
 	found := false
 	for _, p := range lay.Panes {
-		text, err := client.paneRead(p.PaneID, "visible")
-		if err != nil {
-			text = ""
+		ansiText, _, rerr := client.paneReadFull(p.PaneID, "visible", 0, true)
+		if rerr != nil {
+			ansiText = ""
 		}
-		texts[p.PaneID] = text
+		cells, plain := parseANSI(ansiText, tbl)
+		comp.plain[p.PaneID] = plain
+		comp.styled[p.PaneID] = cells
 
 		content := Rect{
 			X: p.Rect.X + 1 - ox,
@@ -54,21 +66,23 @@ func buildComposite(client *herdrClient, targetID string, w, h int) *composite {
 			W: p.Rect.Width - 2,
 			H: p.Rect.Height - 2,
 		}
-		// The focused (target) pane keeps a normal-intensity border so the
-		// composite preserves the focus cue; the rest are dim.
-		borderStyle := styleBorder
+		st := borderSt
 		if p.PaneID == targetID {
-			borderStyle = styleNone
-			target = content
+			st = focusSt // the focused pane keeps its focus-colored ring
+			comp.target = content
 			found = true
 		}
-		paintBorder(base, Rect{X: p.Rect.X - ox, Y: p.Rect.Y - oy, W: p.Rect.Width, H: p.Rect.Height}, borderStyle)
-		paintPaneText(base, content, text)
+		box := Rect{X: p.Rect.X - ox, Y: p.Rect.Y - oy, W: p.Rect.Width, H: p.Rect.Height}
+		paintBorder(base, box, st)
+		if title := titles[p.PaneID]; title != "" {
+			paintBorderTitle(base, box, title, st)
+		}
+		paintPaneCells(base, content, cells)
 	}
-	if !found || target.W < 2 || target.H < 1 {
+	if !found || comp.target.W < 2 || comp.target.H < 1 {
 		return nil
 	}
-	return &composite{base: base, target: target, texts: texts}
+	return comp
 }
 
 // paintBorder draws a single-line box on the rect perimeter. Screen.Set
@@ -90,16 +104,39 @@ func paintBorder(s *Screen, r Rect, st StyleID) {
 	s.Set(x2, y2, '╯', st)
 }
 
-// paintPaneText fills a pane's content rect with its captured visible text,
+// paintBorderTitle writes the pane's caption into its top border, herdr
+// style.
+func paintBorderTitle(s *Screen, box Rect, title string, st StyleID) {
+	if box.W < 8 {
+		return
+	}
+	caption := " " + title + " "
+	maxW := box.W - 4
+	s.WriteString(box.X+2, box.Y, truncate(caption, maxW), st, box.X+2+maxW)
+}
+
+// paintPaneCells fills a pane's content rect with its captured styled cells,
 // top-aligned (a live terminal viewport fills from the top); bottom lines
 // win if the capture somehow exceeds the rect.
-func paintPaneText(s *Screen, r Rect, text string) {
-	lines := strings.Split(text, "\n")
+func paintPaneCells(s *Screen, r Rect, lines [][]Cell) {
 	offset := 0
 	if len(lines) > r.H {
 		offset = len(lines) - r.H
 	}
 	for li := 0; li < r.H && offset+li < len(lines); li++ {
-		s.WriteString(r.X, r.Y+li, lines[offset+li], styleNone, r.X+r.W)
+		s.PutCells(r.X, r.Y+li, lines[offset+li], r.X+r.W)
 	}
 }
+
+// clearRect blanks a region back to the default style (used before painting
+// line/copy mode over the colored composite base).
+func clearRect(s *Screen, r Rect) {
+	for y := r.Y; y < r.Y+r.H; y++ {
+		for x := r.X; x < r.X+r.W; x++ {
+			s.Set(x, y, ' ', styleNone)
+		}
+	}
+}
+
+// joinPlain reassembles the plain text of parsed lines.
+func joinPlain(lines []string) string { return strings.Join(lines, "\n") }

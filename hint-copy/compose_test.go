@@ -11,7 +11,8 @@ import (
 func TestPaintBorderAndPaneText(t *testing.T) {
 	s := NewScreen(10, 5)
 	paintBorder(s, Rect{X: 0, Y: 0, W: 10, H: 5}, styleBorder)
-	paintPaneText(s, Rect{X: 1, Y: 1, W: 8, H: 3}, "hello\nworld")
+	cells, _ := parseANSI("hello\nworld", newStyleTable())
+	paintPaneCells(s, Rect{X: 1, Y: 1, W: 8, H: 3}, cells)
 	rows := strings.Split(flushPlain(s), "\r\n")
 	if rows[0] != "╭────────╮" {
 		t.Errorf("top border = %q", rows[0])
@@ -44,7 +45,8 @@ func TestPaintBorderClipsOffscreen(t *testing.T) {
 
 func TestPaintPaneTextPrefersBottom(t *testing.T) {
 	s := NewScreen(10, 2)
-	paintPaneText(s, Rect{X: 0, Y: 0, W: 10, H: 2}, "one\ntwo\nthree")
+	cells, _ := parseANSI("one\ntwo\nthree", newStyleTable())
+	paintPaneCells(s, Rect{X: 0, Y: 0, W: 10, H: 2}, cells)
 	rows := strings.Split(flushPlain(s), "\r\n")
 	if rows[0] != "two" || rows[1] != "three" {
 		t.Errorf("rows = %v", rows)

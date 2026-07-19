@@ -25,13 +25,14 @@ func runFrame(args []string) {
 		errExit("missing " + envTargetPane)
 	}
 	cfg := loadConfig()
-	comp := buildComposite(client, target, w, h)
+	tbl := newStyleTable()
+	comp := buildComposite(client, target, w, h, cfg, tbl)
 	if comp == nil {
 		fmt.Println("composite: nil (would fall back to full-screen)")
 		return
 	}
 	fmt.Printf("composite: target rect %+v\n", comp.target)
-	text := comp.texts[target]
+	text := joinPlain(comp.plain[target])
 	cands := Extract(text, cfg)
 	lm := AssignLabels(cands, cfg)
 	frame := comp.base.Clone()
@@ -39,7 +40,7 @@ func runFrame(args []string) {
 	if content.Y+content.H > h-1 {
 		content.H = h - 1 - content.Y
 	}
-	PaintTokens(frame, content, text, cands, lm, "")
+	PaintTokenOverlay(frame, content, text, cands, lm, "")
 	PaintFooter(frame, tokenFooter(""))
 	frame.Flush(os.Stdout, sgrTable(cfg))
 	fmt.Println()

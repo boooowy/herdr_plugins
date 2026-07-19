@@ -10,8 +10,18 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// colorCode maps a color name or a 0-255 number to an SGR parameter.
+// colorCode maps a color name, a 0-255 number, or a #rrggbb hex value to an
+// SGR parameter.
 func colorCode(name string, bg bool) string {
+	if len(name) == 7 && name[0] == '#' {
+		if v, err := strconv.ParseUint(name[1:], 16, 32); err == nil {
+			base := "38"
+			if bg {
+				base = "48"
+			}
+			return fmt.Sprintf("%s;2;%d;%d;%d", base, (v>>16)&0xff, (v>>8)&0xff, v&0xff)
+		}
+	}
 	named := map[string]int{
 		"black": 30, "red": 31, "green": 32, "yellow": 33,
 		"blue": 34, "magenta": 35, "cyan": 36, "white": 37,
@@ -132,6 +142,91 @@ func paintTokenLine(s *Screen, r Rect, li int, line string, lineCands []Candidat
 	}
 }
 
+// PaintTokenOverlay is the composite-mode token painter: the pane's colored
+// content is already in the base frame, so it only restyles each candidate
+// span and stamps the hint label over the leading cells — the tmux-thumbs
+// look on top of the real pane pixels.
+func PaintTokenOverlay(s *Screen, r Rect, text string, cands []Candidate, lm *LabelMap, prefix string) {
+	lines := strings.Split(text, "\n")
+	offset := 0
+	if len(lines) > r.H {
+		offset = len(lines) - r.H
+	}
+	for _, c := range cands {
+		if c.Line < offset || c.Line-offset >= r.H {
+			continue
+		}
+		y := r.Y + c.Line - offset
+		runes := []rune(lines[c.Line])
+		x := r.X
+		for i := 0; i < c.StartRune && i < len(runes); i++ {
+			x += runewidth.RuneWidth(runes[i])
+		}
+		cx := x
+		for i := c.StartRune; i < c.EndRune && i < len(runes); i++ {
+			wdt := runewidth.RuneWidth(runes[i])
+			if cx+wdt > r.X+r.W {
+				break
+			}
+			s.SetStyle(cx, y, styleMatch)
+			if wdt == 2 {
+				s.SetStyle(cx+1, y, styleMatch)
+			}
+			cx += wdt
+		}
+		if label := lm.LabelFor(c.Text); label != "" {
+			st := styleHint
+			if prefix != "" && !strings.HasPrefix(label, prefix) {
+				st = styleDim
+			}
+			lx := x
+			for _, lr := range label {
+				if lx >= r.X+r.W {
+					break
+				}
+				s.Set(lx, y, lr, st)
+				lx++
+			}
+		}
+	}
+}
+
+// PaintLineModeStyled is the composite-mode line painter: labels in a left
+// margin, the pane's colored cells shifted right, anchor row inverted.
+func PaintLineModeStyled(s *Screen, r Rect, styled [][]Cell, ll *LineLabels, prefix string, anchor int) {
+	offset := 0
+	if len(styled) > r.H {
+		offset = len(styled) - r.H
+	}
+	margin := 0
+	if ll.Width() > 0 {
+		margin = ll.Width() + 1
+	}
+	maxX := r.X + r.W
+	for li := 0; li < r.H && offset+li < len(styled); li++ {
+		abs := offset + li
+		y := r.Y + li
+		label := ll.LabelFor(abs)
+		x := r.X
+		if label != "" {
+			labelStyle := styleHint
+			if prefix != "" && !strings.HasPrefix(label, prefix) {
+				labelStyle = styleDim
+			}
+			x = s.WriteString(x, y, label, labelStyle, maxX)
+			for ; x < r.X+margin && x < maxX; x++ {
+				s.Set(x, y, ' ', styleNone)
+			}
+		}
+		s.PutCells(x, y, styled[abs], maxX)
+		if abs == anchor { // invert the whole row over whatever colors it has
+			for ix := r.X + margin; ix < maxX; ix++ {
+				s.SetStyle(ix, y, styleInverse)
+			}
+		}
+	}
+}
+
 // PaintLineMode draws line-mode hints into r: a uniform left margin holds
 // each non-empty line's label, content shifts right, the anchor line renders
 // in inverse video.
@@ -176,15 +271,20 @@ func PaintLineMode(s *Screen, r Rect, text string, ll *LineLabels, prefix string
 	}
 }
 
-// PaintCopyMode draws the copy-mode viewport into r: buffer lines, search
+// PaintCopyMode draws the copy-mode viewport into r: buffer lines (styled
+// cells from the ANSI capture when available, plain text otherwise), search
 // highlights, the selection, and the cursor.
-func PaintCopyMode(s *Screen, r Rect, cs *CopyState) {
+func PaintCopyMode(s *Screen, r Rect, cs *CopyState, styled [][]Cell) {
 	for row := 0; row < r.H; row++ {
 		li := cs.Top + row
 		if li >= len(cs.Buf) {
 			break
 		}
-		s.WriteString(r.X, r.Y+row, string(cs.Buf[li]), styleNone, r.X+r.W)
+		if styled != nil && li < len(styled) {
+			s.PutCells(r.X, r.Y+row, styled[li], r.X+r.W)
+		} else {
+			s.WriteString(r.X, r.Y+row, string(cs.Buf[li]), styleNone, r.X+r.W)
+		}
 	}
 	if cs.Search.QueryLen > 0 {
 		for _, m := range cs.Search.Matches {

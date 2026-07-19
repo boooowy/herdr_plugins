@@ -152,9 +152,10 @@ func (c *herdrClient) paneLayout(paneID string) (*paneLayoutResult, error) {
 	return &out.Layout, nil
 }
 
-// paneReadLines is paneRead with a trailing-lines cap, reporting whether the
-// cap truncated older history (used for the copy-mode scrollback read).
-func (c *herdrClient) paneReadLines(paneID, source string, lines int) (string, bool, error) {
+// paneReadFull is pane.read with every knob: source, an optional trailing-
+// lines cap (reported back via truncated), and raw ANSI capture (colors kept)
+// when ansi is true.
+func (c *herdrClient) paneReadFull(paneID, source string, lines int, ansi bool) (string, bool, error) {
 	var out struct {
 		Read struct {
 			Text      string `json:"text"`
@@ -168,11 +169,39 @@ func (c *herdrClient) paneReadLines(paneID, source string, lines int) (string, b
 	if lines > 0 {
 		params["lines"] = lines
 	}
+	if ansi {
+		params["format"] = "ansi"
+		params["strip_ansi"] = false
+	}
 	err := c.call("pane.read", params, &out)
 	if err != nil {
 		return "", false, err
 	}
 	return out.Read.Text, out.Read.Truncated, nil
+}
+
+// paneTitles maps pane ids to their display titles (user label first, then
+// the stripped terminal title), for reproducing herdr's border captions.
+func (c *herdrClient) paneTitles() map[string]string {
+	var out struct {
+		Panes []struct {
+			PaneID                string `json:"pane_id"`
+			Label                 string `json:"label"`
+			TerminalTitleStripped string `json:"terminal_title_stripped"`
+		} `json:"panes"`
+	}
+	if err := c.call("pane.list", map[string]any{}, &out); err != nil {
+		return nil
+	}
+	m := make(map[string]string, len(out.Panes))
+	for _, p := range out.Panes {
+		title := p.Label
+		if title == "" {
+			title = p.TerminalTitleStripped
+		}
+		m[p.PaneID] = title
+	}
+	return m
 }
 
 // notify shows a toast notification inside herdr. sound is one of

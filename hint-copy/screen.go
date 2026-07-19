@@ -8,8 +8,9 @@ import (
 )
 
 // StyleID names a visual style; Flush maps it to an SGR sequence via
-// sgrTable. Painters set styles per cell instead of emitting escapes.
-type StyleID uint8
+// sgrTable (built-ins) or the screen's styleTable (dynamic, interned from
+// ANSI captures). Painters set styles per cell instead of emitting escapes.
+type StyleID uint16
 
 const (
 	styleNone StyleID = iota
@@ -53,8 +54,9 @@ type Rect struct {
 // the grid into one terminal frame with the same framing the streaming
 // renderers used (home cursor, per-row erase-to-eol, no scroll).
 type Screen struct {
-	W, H  int
-	cells []Cell
+	W, H   int
+	cells  []Cell
+	styles *styleTable // resolves dynamic StyleIDs; nil for built-ins only
 }
 
 func NewScreen(w, h int) *Screen {
@@ -113,9 +115,36 @@ func (s *Screen) WriteString(x, y int, text string, st StyleID, maxX int) int {
 // Clone deep-copies the screen; composite mode clones the static base every
 // frame and paints the dynamic parts on top.
 func (s *Screen) Clone() *Screen {
-	c := &Screen{W: s.W, H: s.H, cells: make([]Cell, len(s.cells))}
+	c := &Screen{W: s.W, H: s.H, cells: make([]Cell, len(s.cells)), styles: s.styles}
 	copy(c.cells, s.cells)
 	return c
+}
+
+// PutCells copies pre-styled cells (from an ANSI capture) into row y starting
+// at x, clipped to maxX. A wide rune whose continuation would cross maxX is
+// dropped.
+func (s *Screen) PutCells(x, y int, cells []Cell, maxX int) {
+	if y < 0 || y >= s.H {
+		return
+	}
+	if maxX > s.W {
+		maxX = s.W
+	}
+	for i := 0; i < len(cells) && x < maxX; i++ {
+		c := cells[i]
+		if c.R == 0 {
+			continue // continuations re-emitted below
+		}
+		wdt := runewidth.RuneWidth(c.R)
+		if x+wdt > maxX {
+			return
+		}
+		*s.at(x, y) = c
+		if wdt == 2 {
+			*s.at(x+1, y) = Cell{R: 0, Style: c.Style}
+		}
+		x += wdt
+	}
 }
 
 // Flush emits the frame: home cursor, then each row's content followed by
@@ -143,6 +172,8 @@ func (s *Screen) Flush(w io.Writer, sgr map[StyleID]string) {
 				sb.WriteString("\x1b[0m")
 				if code, ok := sgr[c.Style]; ok && c.Style != styleNone {
 					sb.WriteString(code)
+				} else if c.Style >= dynStyleBase && s.styles != nil {
+					sb.WriteString(s.styles.sequence(c.Style))
 				}
 				cur = c.Style
 			}

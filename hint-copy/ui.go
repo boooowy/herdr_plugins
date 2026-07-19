@@ -48,15 +48,21 @@ func runUI() {
 		w, h = 80, 24
 	}
 
-	comp := buildComposite(client, target, w, h)
+	tbl := newStyleTable()
+	comp := buildComposite(client, target, w, h, cfg, tbl)
 	var text string
+	var targetStyled [][]Cell
 	if comp != nil {
-		text = comp.texts[target]
+		text = joinPlain(comp.plain[target])
+		targetStyled = comp.styled[target]
 	} else {
-		text, err = client.paneRead(target, "visible")
-		if err != nil {
-			errExit("read pane:", err)
+		ansiText, _, rerr := client.paneReadFull(target, "visible", 0, true)
+		if rerr != nil {
+			errExit("read pane:", rerr)
 		}
+		var plainLines []string
+		targetStyled, plainLines = parseANSI(ansiText, tbl)
+		text = joinPlain(plainLines)
 	}
 
 	cands := Extract(text, cfg)
@@ -96,16 +102,21 @@ func runUI() {
 	anchor := -1
 	help := false
 	var cs *CopyState
+	var copyStyled [][]Cell
 
-	// enterCopy lazily loads the scrollback buffer; the visible capture is
-	// the fallback when the recent read fails or is empty.
+	// enterCopy lazily loads the scrollback buffer (colors kept); the visible
+	// capture is the fallback when the recent read fails or is empty.
 	enterCopy := func() {
 		if cs == nil {
-			full, trunc, rerr := client.paneReadLines(target, "recent", cfg.ScrollbackLines)
-			if rerr != nil || strings.TrimSpace(full) == "" {
-				full, trunc = text, false
+			plainBuf, styled, trunc := text, targetStyled, false
+			if ansiText, tr, rerr := client.paneReadFull(target, "recent", cfg.ScrollbackLines, true); rerr == nil {
+				sc, pl := parseANSI(ansiText, tbl)
+				if p := joinPlain(pl); strings.TrimSpace(p) != "" {
+					plainBuf, styled, trunc = p, sc, tr
+				}
 			}
-			cs = NewCopyState(full, content.W, content.H, trunc)
+			cs = NewCopyState(plainBuf, content.W, content.H, trunc)
+			copyStyled = styled
 		}
 		mode = modeCopy
 		prefix, anchor = "", -1
@@ -132,11 +143,15 @@ func runUI() {
 	}()
 
 	sgr := sgrTable(cfg)
-	newFrame := func() *Screen {
-		if comp != nil {
-			return comp.base.Clone()
-		}
-		return NewScreen(w, h)
+	// The static base under every frame: the whole-tab composite, or the
+	// target's own colored content when compositing is unavailable.
+	base := (*Screen)(nil)
+	if comp != nil {
+		base = comp.base
+	} else {
+		base = NewScreen(w, h)
+		base.styles = tbl
+		paintPaneCells(base, content, targetStyled)
 	}
 
 	keys := newKeyReader(os.Stdin)
@@ -148,16 +163,18 @@ func runUI() {
 			PaintHelp(frame, Rect{X: 0, Y: 0, W: w, H: h - 1}, cfg)
 			PaintFooter(frame, " press any key to return")
 		case mode == modeCopy:
-			frame = newFrame()
-			PaintCopyMode(frame, content, cs)
+			frame = base.Clone()
+			clearRect(frame, content)
+			PaintCopyMode(frame, content, cs, copyStyled)
 			PaintFooter(frame, copyFooter(cs))
 		case mode == modeToken:
-			frame = newFrame()
-			PaintTokens(frame, content, text, cands, lm, prefix)
+			frame = base.Clone()
+			PaintTokenOverlay(frame, content, text, cands, lm, prefix)
 			PaintFooter(frame, tokenFooter(prefix))
 		default:
-			frame = newFrame()
-			PaintLineMode(frame, content, text, ll, prefix, anchor)
+			frame = base.Clone()
+			clearRect(frame, content)
+			PaintLineModeStyled(frame, content, targetStyled, ll, prefix, anchor)
 			PaintFooter(frame, lineFooter(prefix, anchor))
 		}
 		frame.Flush(out, sgr)

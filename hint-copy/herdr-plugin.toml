@@ -1,6 +1,6 @@
 id = "kayakatu.hint-copy"
 name = "Hint Copy"
-version = "0.4.0"
+version = "0.5.0"
 min_herdr_version = "0.7.0"
 description = "tmux-thumbs style hint copy: press a key, hit a hint label, and the URL/path/SHA/IP under it lands on your clipboard."
 platforms = ["macos", "linux"]
@@ -20,6 +20,8 @@ command = ["./bin/hint-copy", "action", "copy"]
 
 [[panes]]
 id = "hints"
-title = "Hint Copy"
+# herdr requires a non-empty pane title; a box-drawing dash blends into the
+# overlay's border so the composite looks like the untouched tab.
+title = "─"
 placement = "overlay"
 command = ["./bin/hint-copy", "ui"]
