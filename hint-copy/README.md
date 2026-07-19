@@ -21,7 +21,7 @@ herdr の画面に表示されている URL・ファイルパス・IPアドレ�
 make plugin-link
 
 # または GitHub から
-herdr plugin install <owner>/herdr_plugins/hint-copy
+herdr plugin install boooowy/herdr_plugins/hint-copy
 ```
 
 ビルドには Go が必要です(`[[build]]` が `go build` を実行)。

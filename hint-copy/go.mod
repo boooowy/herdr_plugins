@@ -1,4 +1,4 @@
-module github.com/kayakatu/herdr-plugins/hint-copy
+module github.com/boooowy/herdr_plugins/hint-copy
 
 go 1.26.4
 
