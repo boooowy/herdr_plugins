@@ -113,6 +113,26 @@ func TestRenderLinesClipsAtWidth(t *testing.T) {
 	}
 }
 
+func TestRenderHelp(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Patterns = map[string]bool{"number": false}
+	cfg.CustomPatterns = []CustomPattern{{Name: "jira", Regex: `X-\d+`}}
+	var sb strings.Builder
+	RenderHelp(&sb, 100, 40, cfg)
+	out := sgrRe.ReplaceAllString(sb.String(), "")
+	for _, want := range []string{"line mode", "copy the range", "url", "quoted", "jira", "press any key"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help missing %q", want)
+		}
+	}
+	if !strings.Contains(out, "number        off") {
+		t.Errorf("disabled pattern not shown as off:\n%s", out)
+	}
+	if !strings.Contains(out, "ipv6          off") {
+		t.Error("ipv6 default-off not shown")
+	}
+}
+
 func TestRenderTokenFooterMentionsLineMode(t *testing.T) {
 	out := renderPlain(t, "see /tmp/x.log ok", 80, 24, defaultConfig(), "")
 	if !strings.Contains(out, "space: line mode") {

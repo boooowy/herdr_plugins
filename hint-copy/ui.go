@@ -79,12 +79,16 @@ func runUI() {
 	}
 	prefix := ""
 	anchor := -1
+	help := false
 
 	in := bufio.NewReader(os.Stdin)
 	for {
-		if mode == modeToken {
+		switch {
+		case help:
+			RenderHelp(out, w, h, cfg)
+		case mode == modeToken:
 			Render(out, text, cands, lm, prefix, w, h, cfg)
-		} else {
+		default:
 			RenderLines(out, text, ll, prefix, anchor, w, h, cfg)
 		}
 		out.Flush()
@@ -93,9 +97,16 @@ func runUI() {
 		if err != nil {
 			return
 		}
+		if help { // any key returns from help to where you were
+			help = false
+			continue
+		}
 		switch {
 		case b == 0x1b || b == 0x03: // Esc / Ctrl-C — any escape sequence cancels too
 			return
+		case b == '?':
+			help = true
+			prefix = ""
 		case b == ' ': // checked before the alphabet so it always toggles
 			if mode == modeToken {
 				mode = modeLine

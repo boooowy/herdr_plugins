@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -93,7 +95,7 @@ func Render(w io.Writer, screen string, cands []Candidate, lm *LabelMap, prefix 
 		sb.WriteString("\x1b[K\r\n")
 	}
 	if height >= 2 {
-		footer := " type a label to copy · space: line mode · esc to cancel"
+		footer := " type a label to copy · space: line mode · ? help · esc to cancel"
 		if prefix != "" {
 			footer = " " + prefix + "_ ·" + footer
 		}
@@ -153,7 +155,7 @@ func RenderLines(w io.Writer, screen string, ll *LineLabels, prefix string, anch
 		sb.WriteString("\x1b[K\r\n")
 	}
 	if height >= 2 {
-		footer := " line mode: type a label · space: token mode · esc to cancel"
+		footer := " line mode: type a label · space: token mode · ? help · esc to cancel"
 		if anchor >= 0 {
 			footer = " enter/same label: copy this line · another label: copy range · esc: cancel"
 		} else if prefix != "" {
@@ -165,6 +167,82 @@ func RenderLines(w io.Writer, screen string, ll *LineLabels, prefix string, anch
 	}
 	sb.WriteString("\x1b[K")
 	io.WriteString(w, sb.String())
+}
+
+// RenderHelp paints the in-overlay help screen: the key reference for both
+// modes plus the pattern inventory with its current on/off state (so what the
+// user sees reflects their config, not just the defaults).
+func RenderHelp(w io.Writer, width, height int, cfg Config) {
+	st := makeStyles(cfg)
+	var lines []string
+	add := func(s string) { lines = append(lines, s) }
+
+	add(" hint-copy " + version + " — help")
+	add("")
+	add(" token mode (URLs, paths, ...)")
+	add("   a s d ...      copy the labeled string")
+	add("   space          switch to line mode")
+	add(" line mode (whole lines)")
+	add("   label          select the anchor line")
+	add("   enter / same   copy the anchor line")
+	add("   other label    copy the range between the two lines")
+	add(" anywhere")
+	add("   esc / ctrl-c   cancel")
+	add("   ?              this help (any key returns)")
+	add("")
+	add(" patterns — toggle in " + configPathHint())
+
+	// Built-in patterns in priority order (dedup shared names like quoted),
+	// then custom ones, packed three per row.
+	var entries []string
+	seen := make(map[string]bool)
+	for _, p := range builtinPatterns {
+		if seen[p.name] {
+			continue
+		}
+		seen[p.name] = true
+		state := "on"
+		if !cfg.patternEnabled(p.name) {
+			state = "off"
+		}
+		entries = append(entries, fmt.Sprintf("%-13s %-3s", p.name, state))
+	}
+	for _, cp := range cfg.CustomPatterns {
+		entries = append(entries, fmt.Sprintf("%-13s %-3s", cp.Name, "on"))
+	}
+	for i := 0; i < len(entries); i += 3 {
+		row := "   "
+		for j := i; j < i+3 && j < len(entries); j++ {
+			row += entries[j] + " "
+		}
+		add(row)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\x1b[H")
+	_, view := viewWindow(len(lines), height)
+	for li := 0; li < view; li++ {
+		if li < len(lines) {
+			writeClipped(&sb, lines[li], width)
+		}
+		sb.WriteString("\x1b[K\r\n")
+	}
+	if height >= 2 {
+		sb.WriteString(st.dim)
+		sb.WriteString(runewidth.Truncate(" press any key to return", width, ""))
+		sb.WriteString(st.reset)
+	}
+	sb.WriteString("\x1b[K")
+	io.WriteString(w, sb.String())
+}
+
+// configPathHint names the config file location for the help screen, using
+// the concrete dir herdr injected when available.
+func configPathHint() string {
+	if dir := os.Getenv("HERDR_PLUGIN_CONFIG_DIR"); dir != "" {
+		return dir + "/config.toml"
+	}
+	return "$HERDR_PLUGIN_CONFIG_DIR/config.toml"
 }
 
 // writeClipped emits line runes up to maxWidth display columns, skipping \r.
