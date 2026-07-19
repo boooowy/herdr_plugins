@@ -53,22 +53,29 @@ func colorCode(name string, bg bool) string {
 	return "39"
 }
 
-// Render paints one full frame: the captured screen with hint labels replacing
-// the leading cells of each candidate (tmux-thumbs style), plus a footer.
-// Lines are emitted top-to-bottom in full, so wide/CJK characters keep their
-// natural alignment without any column bookkeeping across the frame. When the
-// capture is taller than the overlay the bottom lines win.
-func Render(w io.Writer, screen string, cands []Candidate, lm *LabelMap, prefix string, width, height int, cfg Config) {
-	st := makeStyles(cfg)
-	lines := strings.Split(screen, "\n")
-	view := height - 1 // one row reserved for the footer
+// viewWindow decides which slice of the captured lines fits the overlay: one
+// row is reserved for the footer, and when the capture is taller than the
+// view the bottom lines win. Renderers and the UI share it so they agree on
+// what is visible.
+func viewWindow(nLines, height int) (offset, view int) {
+	view = height - 1
 	if view < 1 {
 		view = 1
 	}
-	offset := 0
-	if len(lines) > view {
-		offset = len(lines) - view
+	if nLines > view {
+		offset = nLines - view
 	}
+	return offset, view
+}
+
+// Render paints one full frame: the captured screen with hint labels replacing
+// the leading cells of each candidate (tmux-thumbs style), plus a footer.
+// Lines are emitted top-to-bottom in full, so wide/CJK characters keep their
+// natural alignment without any column bookkeeping across the frame.
+func Render(w io.Writer, screen string, cands []Candidate, lm *LabelMap, prefix string, width, height int, cfg Config) {
+	st := makeStyles(cfg)
+	lines := strings.Split(screen, "\n")
+	offset, view := viewWindow(len(lines), height)
 	byLine := make(map[int][]Candidate)
 	for _, c := range cands {
 		if c.Line >= offset {
@@ -86,7 +93,7 @@ func Render(w io.Writer, screen string, cands []Candidate, lm *LabelMap, prefix 
 		sb.WriteString("\x1b[K\r\n")
 	}
 	if height >= 2 {
-		footer := " type a label to copy · esc to cancel"
+		footer := " type a label to copy · space: line mode · esc to cancel"
 		if prefix != "" {
 			footer = " " + prefix + "_ ·" + footer
 		}
@@ -96,6 +103,84 @@ func Render(w io.Writer, screen string, cands []Candidate, lm *LabelMap, prefix 
 	}
 	sb.WriteString("\x1b[K")
 	io.WriteString(w, sb.String())
+}
+
+// RenderLines paints a line-mode frame: every non-empty line gets its hint
+// label in a uniform left margin (content shifts right, so columns across
+// lines stay aligned), the anchor line is shown in inverse video, and the
+// footer explains the pending state. It is deliberately separate from Render:
+// token mode substitutes labels in place, line mode adds a margin — the two
+// share almost no drawing logic.
+func RenderLines(w io.Writer, screen string, ll *LineLabels, prefix string, anchor, width, height int, cfg Config) {
+	st := makeStyles(cfg)
+	lines := strings.Split(screen, "\n")
+	offset, view := viewWindow(len(lines), height)
+	margin := 0
+	if ll.Width() > 0 {
+		margin = ll.Width() + 1
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\x1b[H")
+	for li := 0; li < view; li++ {
+		abs := offset + li
+		if abs < len(lines) {
+			line := lines[abs]
+			label := ll.LabelFor(abs)
+			isAnchor := abs == anchor
+			if isAnchor {
+				sb.WriteString("\x1b[7m")
+			}
+			if label != "" {
+				style := st.hint
+				if prefix != "" && !strings.HasPrefix(label, prefix) {
+					style = st.dim
+				}
+				sb.WriteString(style)
+				sb.WriteString(label)
+				sb.WriteString(st.reset)
+				if isAnchor {
+					sb.WriteString("\x1b[7m")
+				}
+				sb.WriteString(strings.Repeat(" ", margin-len(label)))
+			}
+			// Unlabeled lines are exactly the blank ones — no margin needed.
+			writeClipped(&sb, line, width-margin)
+			if isAnchor {
+				sb.WriteString(st.reset)
+			}
+		}
+		sb.WriteString("\x1b[K\r\n")
+	}
+	if height >= 2 {
+		footer := " line mode: type a label · space: token mode · esc to cancel"
+		if anchor >= 0 {
+			footer = " enter/same label: copy this line · another label: copy range · esc: cancel"
+		} else if prefix != "" {
+			footer = " " + prefix + "_ ·" + footer
+		}
+		sb.WriteString(st.dim)
+		sb.WriteString(runewidth.Truncate(footer, width, ""))
+		sb.WriteString(st.reset)
+	}
+	sb.WriteString("\x1b[K")
+	io.WriteString(w, sb.String())
+}
+
+// writeClipped emits line runes up to maxWidth display columns, skipping \r.
+func writeClipped(sb *strings.Builder, line string, maxWidth int) {
+	col := 0
+	for _, r := range line {
+		if r == '\r' {
+			continue
+		}
+		wdt := runewidth.RuneWidth(r)
+		if col+wdt > maxWidth {
+			return
+		}
+		sb.WriteRune(r)
+		col += wdt
+	}
 }
 
 // renderLine emits one screen line, overlaying each candidate's label over the

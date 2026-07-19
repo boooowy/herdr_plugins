@@ -1,6 +1,9 @@
 package main
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 // envTargetPane carries the launch pane's id into the overlay process. The
 // overlay's own HERDR_PANE_ID is the overlay pane itself, so the original
@@ -22,14 +25,15 @@ func runAction() {
 		errExit("could not resolve the focused pane")
 	}
 
-	// Pre-check: with no candidates on screen, a toast beats an empty overlay.
+	// Pre-check: line mode can copy any non-blank line, so only a truly
+	// empty screen skips the overlay in favor of a toast.
 	text, err := client.paneRead(paneID, "visible")
 	if err != nil {
 		errExit("read pane:", err)
 	}
 	cfg := loadConfig()
-	if len(Extract(text, cfg)) == 0 {
-		client.notify("Hint Copy", "No candidates on screen", "none")
+	if len(Extract(text, cfg)) == 0 && strings.TrimSpace(text) == "" {
+		client.notify("Hint Copy", "Nothing to copy on screen", "none")
 		return
 	}
 

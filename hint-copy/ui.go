@@ -10,10 +10,18 @@ import (
 	"golang.org/x/term"
 )
 
+type uiMode int
+
+const (
+	modeToken uiMode = iota
+	modeLine
+)
+
 // runUI is the overlay pane's entrypoint. It re-reads the target pane itself
 // (never its own HERDR_PANE_ID — that is the overlay), renders the hints, and
-// waits for a label or a cancel. Exiting closes the overlay; herdr tears the
-// pane down when its process ends.
+// waits for a label or a cancel. Space toggles between token mode (URLs,
+// paths, ...) and line mode (whole lines, with anchor+label range selection).
+// Exiting closes the overlay; herdr tears the pane down when its process ends.
 func runUI() {
 	client, err := newHerdrClient()
 	if err != nil {
@@ -36,8 +44,9 @@ func runUI() {
 		client.notify("Hint Copy", "invalid custom pattern(s): "+strings.Join(bad, ", "), "none")
 	}
 	cands := Extract(text, cfg)
-	if len(cands) == 0 {
-		client.notify("Hint Copy", "No candidates on screen", "none")
+	lines := strings.Split(text, "\n")
+	if len(cands) == 0 && strings.TrimSpace(text) == "" {
+		client.notify("Hint Copy", "Nothing to copy on screen", "none")
 		return
 	}
 	lm := AssignLabels(cands, cfg)
@@ -52,6 +61,8 @@ func runUI() {
 	if err != nil || w <= 0 || h <= 0 {
 		w, h = 80, 24
 	}
+	offset, view := viewWindow(len(lines), h)
+	ll := AssignLineLabels(lines, offset, view, cfg)
 
 	out := bufio.NewWriter(os.Stdout)
 	fmt.Fprint(out, "\x1b[?1049h\x1b[?25l") // alt screen, hide cursor
@@ -60,19 +71,43 @@ func runUI() {
 		out.Flush()
 	}()
 
-	in := bufio.NewReader(os.Stdin)
+	// A screen with no token candidates but visible text starts straight in
+	// line mode — that is the only thing left to copy.
+	mode := modeToken
+	if len(cands) == 0 {
+		mode = modeLine
+	}
 	prefix := ""
+	anchor := -1
+
+	in := bufio.NewReader(os.Stdin)
 	for {
-		Render(out, text, cands, lm, prefix, w, h, cfg)
+		if mode == modeToken {
+			Render(out, text, cands, lm, prefix, w, h, cfg)
+		} else {
+			RenderLines(out, text, ll, prefix, anchor, w, h, cfg)
+		}
 		out.Flush()
 
 		b, err := in.ReadByte()
 		if err != nil {
 			return
 		}
-		switch b {
-		case 0x1b, 0x03: // Esc / Ctrl-C — any escape sequence cancels too
+		switch {
+		case b == 0x1b || b == 0x03: // Esc / Ctrl-C — any escape sequence cancels too
 			return
+		case b == ' ': // checked before the alphabet so it always toggles
+			if mode == modeToken {
+				mode = modeLine
+			} else {
+				mode = modeToken
+			}
+			prefix, anchor = "", -1
+		case b == '\r' || b == '\n':
+			if mode == modeLine && anchor >= 0 {
+				copyAndConfirm(client, SingleLineText(lines, anchor), cfg)
+				return
+			}
 		default:
 			r := unicode.ToLower(rune(b))
 			if !strings.ContainsRune(cfg.Alphabet, r) {
@@ -80,12 +115,30 @@ func runUI() {
 				continue
 			}
 			prefix += string(r)
-			if picked, ok := lm.Exact(prefix); ok {
-				copyAndConfirm(client, picked, cfg)
-				return
-			}
-			if !lm.HasPrefix(prefix) {
-				prefix = ""
+			if mode == modeToken {
+				if picked, ok := lm.Exact(prefix); ok {
+					copyAndConfirm(client, picked, cfg)
+					return
+				}
+				if !lm.HasPrefix(prefix) {
+					prefix = ""
+				}
+			} else {
+				if line, ok := ll.Exact(prefix); ok {
+					prefix = ""
+					switch {
+					case anchor < 0:
+						anchor = line // first label: set the anchor, keep going
+					case line == anchor:
+						copyAndConfirm(client, SingleLineText(lines, anchor), cfg)
+						return
+					default:
+						copyAndConfirm(client, RangeText(lines, anchor, line), cfg)
+						return
+					}
+				} else if !ll.HasPrefix(prefix) {
+					prefix = ""
+				}
 			}
 		}
 	}

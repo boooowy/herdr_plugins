@@ -26,10 +26,12 @@ type Config struct {
 	loadErr string
 }
 
-// CustomPattern is one user-supplied regex, e.g. a Jira ticket id.
+// CustomPattern is one user-supplied regex, e.g. a Jira ticket id. Group
+// selects the capture group to copy (0 = whole match).
 type CustomPattern struct {
 	Name  string `toml:"name"`
 	Regex string `toml:"regex"`
+	Group int    `toml:"group"`
 }
 
 func defaultConfig() Config {

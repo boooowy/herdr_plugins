@@ -59,9 +59,10 @@ func TestExtractSHA(t *testing.T) {
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("got %v want %v", got, want)
 	}
-	// Pure decimal runs must not count as SHAs.
-	if got := extractTexts(t, "pid 1234567 running"); len(got) != 0 {
-		t.Errorf("decimal matched as sha: %v", got)
+	// Pure decimal runs must not count as SHAs (they are number matches).
+	cands := Extract("pid 1234567 running", defaultConfig())
+	if len(cands) != 1 || cands[0].Pattern != "number" {
+		t.Errorf("decimal should match as number, got %+v", cands)
 	}
 }
 
@@ -130,6 +131,133 @@ func TestPatternToggleAndCustom(t *testing.T) {
 	got := texts(Extract("fix ABC-123 at 3f2a91c", cfg))
 	if strings.Join(got, "|") != "ABC-123" {
 		t.Errorf("got %v", got)
+	}
+}
+
+func TestExtractMarkdownURL(t *testing.T) {
+	cands := Extract("see [the docs](https://example.com/docs) here", defaultConfig())
+	if len(cands) != 1 {
+		t.Fatalf("got %v", texts(cands))
+	}
+	c := cands[0]
+	if c.Pattern != "markdown_url" || c.Text != "https://example.com/docs" {
+		t.Errorf("got %+v", c)
+	}
+	line := []rune("see [the docs](https://example.com/docs) here")
+	if string(line[c.StartRune:c.EndRune]) != c.Text {
+		t.Errorf("group span misaligned: %q", string(line[c.StartRune:c.EndRune]))
+	}
+}
+
+func TestExtractDiffPath(t *testing.T) {
+	screen := "--- a/src/main.go\n+++ b/src/main.go\ndiff --git a/pkg/x.go b/pkg/x.go"
+	cands := Extract(screen, defaultConfig())
+	for _, c := range cands {
+		if c.Pattern != "diff_path" {
+			t.Errorf("leftover %s candidate: %q", c.Pattern, c.Text)
+		}
+	}
+	got := texts(cands)
+	want := []string{"src/main.go", "src/main.go", "pkg/x.go"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+func TestExtractDockerDigest(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("0abc", 16)
+	cands := Extract("pulled "+digest+" done", defaultConfig())
+	if len(cands) != 1 || cands[0].Pattern != "docker" || cands[0].Text != digest {
+		t.Errorf("got %v", cands)
+	}
+}
+
+func TestExtractAddressAndColor(t *testing.T) {
+	got := extractTexts(t, "at 0xDEADbeef color #a1b2c3 and #fff but not #zzzz")
+	want := []string{"0xDEADbeef", "#a1b2c3", "#fff"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+func TestExtractLinenum(t *testing.T) {
+	cands := Extract("error at src/lib/util.ts:45:12 and main.go:123 but time 12:34", defaultConfig())
+	got := texts(cands)
+	want := []string{"src/lib/util.ts:45:12", "main.go:123"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %v want %v", got, want)
+	}
+	for _, c := range cands {
+		if c.Pattern != "linenum" {
+			t.Errorf("%q matched as %s, want linenum", c.Text, c.Pattern)
+		}
+	}
+}
+
+func TestExtractKubernetes(t *testing.T) {
+	cands := Extract("restarted deployment.apps/zookeeper ok", defaultConfig())
+	if len(cands) != 1 || cands[0].Pattern != "kubernetes" || cands[0].Text != "deployment.apps/zookeeper" {
+		t.Errorf("got %+v", cands)
+	}
+}
+
+func TestExtractQuoted(t *testing.T) {
+	// Content is copied without the quotes; escapes kept as-is.
+	cands := Extract(`msg "hello \"world\"" and '/tmp/x.log' end`, defaultConfig())
+	got := texts(cands)
+	want := []string{`hello \"world\"`, "/tmp/x.log"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %v want %v", got, want)
+	}
+	for _, c := range cands {
+		if c.Pattern != "quoted" {
+			t.Errorf("%q matched as %s, want quoted", c.Text, c.Pattern)
+		}
+	}
+	// Apostrophes never open a single-quoted string.
+	if got := extractTexts(t, "don't panic it's fine"); len(got) != 0 {
+		t.Errorf("apostrophe matched: %v", got)
+	}
+}
+
+func TestExtractDatetime(t *testing.T) {
+	got := extractTexts(t, "on 2026-07-19 and 2026-07-19T12:34:56Z done")
+	want := []string{"2026-07-19", "2026-07-19T12:34:56Z"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+func TestExtractSemverAndNumber(t *testing.T) {
+	cands := Extract("release v1.2.3 and 1.2.3-rc.1 port 8080 pid 999", defaultConfig())
+	byPattern := map[string][]string{}
+	for _, c := range cands {
+		byPattern[c.Pattern] = append(byPattern[c.Pattern], c.Text)
+	}
+	if strings.Join(byPattern["semver"], "|") != "v1.2.3|1.2.3-rc.1" {
+		t.Errorf("semver: %v", byPattern["semver"])
+	}
+	if strings.Join(byPattern["number"], "|") != "8080" {
+		t.Errorf("number: %v (999 is only 3 digits)", byPattern["number"])
+	}
+	// A real IP stays ipv4; a bogus dotted quad matches nothing.
+	cands = Extract("host 1.2.3.4 junk 999.999.999.999", defaultConfig())
+	if len(cands) != 1 || cands[0].Pattern != "ipv4" || cands[0].Text != "1.2.3.4" {
+		t.Errorf("got %+v", cands)
+	}
+}
+
+func TestCustomPatternGroup(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.CustomPatterns = []CustomPattern{{Name: "ticket", Regex: `ticket=(\w+)`, Group: 1}}
+	cands := Extract("see ticket=ABC123x", cfg)
+	if len(cands) != 1 || cands[0].Text != "ABC123x" {
+		t.Errorf("got %+v", cands)
+	}
+	// Out-of-range group is rejected, not fatal.
+	cfg.CustomPatterns = []CustomPattern{{Name: "bad", Regex: `x`, Group: 2}}
+	if _, bad := buildPatterns(cfg); len(bad) != 1 || bad[0] != "bad" {
+		t.Errorf("bad = %v", bad)
 	}
 }
 
