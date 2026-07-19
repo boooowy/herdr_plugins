@@ -47,7 +47,7 @@ description = "hint-copy: copy mode (scrollback)"
 ## 操作
 
 | キー | 動作 |
-|---|---|
+| --- | --- |
 | ラベル(a, s, d, ...) | その候補をコピーして閉じる。候補が25個以上のときは2文字ラベル |
 | Space | トークンモード ⇔ 行モードの切替 |
 | [ | copyモードに入る(予約キー) |
@@ -62,7 +62,7 @@ description = "hint-copy: copy mode (scrollback)"
 オーバーレイ内で Space を押すと各行の左にラベルが付きます:
 
 | 操作 | 動作 |
-|---|---|
+| --- | --- |
 | ラベル1つ目 | その行を**アンカー**として選択(反転表示) |
 | Enter / 同じラベル | アンカーの1行をコピー(前後の空白は除去) |
 | 別のラベル | アンカーからその行までの**範囲**をコピー(インデント・途中の空行は保持) |
@@ -74,7 +74,7 @@ URL等の候補が1つも無い画面では、最初から行モードで開き�
 オーバーレイ内で `[`、または `kayakatu.hint-copy.copy-mode` アクション(キーバインド例: `cmd+alt+8`)で直接起動。herdr 本体の copy モードと同じキー感覚で、スクロールバック(既定5000行、`scrollback_lines` で変更可)を遡ってコピーできます。
 
 | キー | 動作 |
-|---|---|
+| --- | --- |
 | h j k l / 矢印 | カーソル移動 |
 | w / b / e | 単語移動(行を跨ぐ) |
 | { / } | 段落(空行)単位の移動 |
@@ -94,7 +94,7 @@ copyモード中の `?` は後方検索です(ヘルプはトークン/行モー
 ## 抽出パターン
 
 | パターン | 例 | コピーされるもの |
-|---|---|---|
+| --- | --- | --- |
 | markdown_url | `[docs](https://x.com/d)` | URL部分のみ |
 | url | `https://example.com/app` | 全体 |
 | email | `user@example.com` | 全体 |
@@ -164,10 +164,3 @@ make plugin-link  # ビルドして herdr に登録
 herdr plugin action invoke copy --plugin kayakatu.hint-copy   # キーなしで起動
 herdr plugin log list --plugin kayakatu.hint-copy             # stdout/stderr を確認
 ```
-
-### 実装メモ
-
-- action(キーバインド側)はフォーカスペインを解決して `pane.read`(visible)で画面が空でないかプリチェックし、`plugin.pane.open` でオーバーレイを開く。overlay 配置では `target_pane_id` を渡してはいけない(herdr がアクティブペインに自動アンカーする)。対象ペインIDは env `HINTCOPY_TARGET_PANE_ID` で UI に渡す
-- UI(オーバーレイ側)は自分の `HERDR_PANE_ID` ではなく `HINTCOPY_TARGET_PANE_ID` を読み直す
-- UIプロセスの終了で herdr がオーバーレイを自動クローズする
-- markdown リンク等は「マッチ全体」(重複解決に使用)と「コピーするグループ」の2スパンを候補が持つ
