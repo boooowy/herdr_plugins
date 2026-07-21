@@ -1,6 +1,9 @@
 package main
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // LineLabels binds visible non-empty lines to hint labels for line mode.
 // Unlike token labels there is no dedup: every line is its own target.
@@ -67,6 +70,39 @@ func (ll *LineLabels) LabelFor(line int) string {
 // Width is the uniform label length (0 when nothing is labeled).
 func (ll *LineLabels) Width() int {
 	return ll.labelLen
+}
+
+// sortedLines returns the labeled (non-empty, visible) line indices ascending.
+func (ll *LineLabels) sortedLines() []int {
+	idx := make([]int, 0, len(ll.byLine))
+	for li := range ll.byLine {
+		idx = append(idx, li)
+	}
+	sort.Ints(idx)
+	return idx
+}
+
+// NextLine returns the nearest labeled line below cur (clamped to cur at the
+// bottom). Line-mode selection hops between labeled lines only.
+func (ll *LineLabels) NextLine(cur int) int {
+	for _, li := range ll.sortedLines() {
+		if li > cur {
+			return li
+		}
+	}
+	return cur
+}
+
+// PrevLine returns the nearest labeled line above cur (clamped to cur at the
+// top).
+func (ll *LineLabels) PrevLine(cur int) int {
+	lines := ll.sortedLines()
+	for i := len(lines) - 1; i >= 0; i-- {
+		if lines[i] < cur {
+			return lines[i]
+		}
+	}
+	return cur
 }
 
 // SingleLineText is what a one-line copy yields: the line with surrounding

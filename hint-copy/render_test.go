@@ -61,20 +61,20 @@ func TestRenderPrefersBottomLines(t *testing.T) {
 	}
 }
 
-func renderLinesPlain(t *testing.T, screen string, width, height int, cfg Config, prefix string, anchor int) (plain, raw string) {
+func renderLinesPlain(t *testing.T, screen string, width, height int, cfg Config, prefix string, anchor, cursor int) (plain, raw string) {
 	t.Helper()
 	lines := strings.Split(screen, "\n")
 	offset, view := viewWindow(len(lines), height)
 	ll := AssignLineLabels(lines, offset, view, cfg)
 	var sb strings.Builder
-	RenderLines(&sb, screen, ll, prefix, anchor, width, height, cfg)
+	RenderLines(&sb, screen, ll, prefix, anchor, cursor, width, height, cfg)
 	return sgrRe.ReplaceAllString(sb.String(), ""), sb.String()
 }
 
 // Every non-empty line gets label + space in a uniform margin, so two lines
 // with the same indent stay column-aligned; empty lines get no label.
 func TestRenderLinesMargin(t *testing.T) {
-	out, _ := renderLinesPlain(t, "make build\n\n  go test", 80, 24, defaultConfig(), "", -1)
+	out, _ := renderLinesPlain(t, "make build\n\n  go test", 80, 24, defaultConfig(), "", -1, -1)
 	rows := strings.Split(out, "\r\n")
 	if rows[0] != "a make build" {
 		t.Errorf("row0 = %q", rows[0])
@@ -87,26 +87,35 @@ func TestRenderLinesMargin(t *testing.T) {
 	}
 }
 
-func TestRenderLinesAnchorInverse(t *testing.T) {
-	_, raw := renderLinesPlain(t, "one\ntwo", 80, 24, defaultConfig(), "", 1)
+func TestRenderLinesCursorInverse(t *testing.T) {
+	// A single-line selection (anchor == cursor) inverts the cursor row.
+	_, raw := renderLinesPlain(t, "one\ntwo", 80, 24, defaultConfig(), "", 1, 1)
 	if !strings.Contains(raw, "\x1b[7m") {
-		t.Error("anchor line missing inverse video")
+		t.Error("cursor line missing inverse video")
 	}
 }
 
 func TestRenderLinesFooterStates(t *testing.T) {
-	out, _ := renderLinesPlain(t, "one\ntwo", 80, 24, defaultConfig(), "", -1)
+	out, _ := renderLinesPlain(t, "one\ntwo", 80, 24, defaultConfig(), "", -1, -1)
 	if !strings.Contains(out, "line mode") {
 		t.Errorf("idle footer: %q", out)
 	}
-	out, _ = renderLinesPlain(t, "one\ntwo", 80, 24, defaultConfig(), "", 0)
-	if !strings.Contains(out, "copy range") {
-		t.Errorf("anchor footer: %q", out)
+	// Anchor set: footer shows the vim-style extend/copy hints and a count.
+	out, _ = renderLinesPlain(t, "one\ntwo", 80, 24, defaultConfig(), "", 0, 0)
+	for _, want := range []string{"1 line(s) selected", "j/k", "enter: copy"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("anchor footer missing %q: %q", want, out)
+		}
+	}
+	// Extended selection reports the range size.
+	out, _ = renderLinesPlain(t, "one\ntwo", 80, 24, defaultConfig(), "", 0, 1)
+	if !strings.Contains(out, "2 line(s) selected") {
+		t.Errorf("range footer: %q", out)
 	}
 }
 
 func TestRenderLinesClipsAtWidth(t *testing.T) {
-	out, _ := renderLinesPlain(t, strings.Repeat("x", 200), 10, 24, defaultConfig(), "", -1)
+	out, _ := renderLinesPlain(t, strings.Repeat("x", 200), 10, 24, defaultConfig(), "", -1, -1)
 	row := strings.Split(out, "\r\n")[0]
 	if len([]rune(row)) > 10 {
 		t.Errorf("row too long: %d", len([]rune(row)))
@@ -120,7 +129,7 @@ func TestRenderHelp(t *testing.T) {
 	var sb strings.Builder
 	RenderHelp(&sb, 100, 40, cfg)
 	out := sgrRe.ReplaceAllString(sb.String(), "")
-	for _, want := range []string{"line mode", "copy the range", "url", "quoted", "jira", "press any key"} {
+	for _, want := range []string{"line mode", "extend the selection", "url", "quoted", "jira", "press any key"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help missing %q", want)
 		}

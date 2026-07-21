@@ -192,8 +192,10 @@ func PaintTokenOverlay(s *Screen, r Rect, text string, cands []Candidate, lm *La
 }
 
 // PaintLineModeStyled is the composite-mode line painter: labels in a left
-// margin, the pane's colored cells shifted right, anchor row inverted.
-func PaintLineModeStyled(s *Screen, r Rect, styled [][]Cell, ll *LineLabels, prefix string, anchor int) {
+// margin, the pane's colored cells shifted right, and the selection range
+// [anchor, cursor] highlighted — the range in styleSel, the moving cursor row
+// inverted so you can see which end j/k moves.
+func PaintLineModeStyled(s *Screen, r Rect, styled [][]Cell, ll *LineLabels, prefix string, anchor, cursor int) {
 	offset := 0
 	if len(styled) > r.H {
 		offset = len(styled) - r.H
@@ -202,6 +204,7 @@ func PaintLineModeStyled(s *Screen, r Rect, styled [][]Cell, ll *LineLabels, pre
 	if ll.Width() > 0 {
 		margin = ll.Width() + 1
 	}
+	lo, hi := selRange(anchor, cursor)
 	maxX := r.X + r.W
 	for li := 0; li < r.H && offset+li < len(styled); li++ {
 		abs := offset + li
@@ -219,18 +222,33 @@ func PaintLineModeStyled(s *Screen, r Rect, styled [][]Cell, ll *LineLabels, pre
 			}
 		}
 		s.PutCells(x, y, styled[abs], maxX)
-		if abs == anchor { // invert the whole row over whatever colors it has
+		if anchor >= 0 && abs >= lo && abs <= hi { // highlight the selection
+			st := styleSel
+			if abs == cursor {
+				st = styleInverse
+			}
 			for ix := r.X + margin; ix < maxX; ix++ {
-				s.SetStyle(ix, y, styleInverse)
+				s.SetStyle(ix, y, st)
 			}
 		}
 	}
 }
 
+// selRange normalizes the anchor/cursor pair into an ordered inclusive range.
+func selRange(anchor, cursor int) (int, int) {
+	if cursor < 0 {
+		cursor = anchor
+	}
+	if anchor > cursor {
+		return cursor, anchor
+	}
+	return anchor, cursor
+}
+
 // PaintLineMode draws line-mode hints into r: a uniform left margin holds
-// each non-empty line's label, content shifts right, the anchor line renders
-// in inverse video.
-func PaintLineMode(s *Screen, r Rect, text string, ll *LineLabels, prefix string, anchor int) {
+// each non-empty line's label, content shifts right, and the selection range
+// [anchor, cursor] is highlighted (range in styleSel, cursor row inverted).
+func PaintLineMode(s *Screen, r Rect, text string, ll *LineLabels, prefix string, anchor, cursor int) {
 	lines := strings.Split(text, "\n")
 	offset := 0
 	if len(lines) > r.H {
@@ -240,16 +258,20 @@ func PaintLineMode(s *Screen, r Rect, text string, ll *LineLabels, prefix string
 	if ll.Width() > 0 {
 		margin = ll.Width() + 1
 	}
+	lo, hi := selRange(anchor, cursor)
 	maxX := r.X + r.W
 	for li := 0; li < r.H && offset+li < len(lines); li++ {
 		abs := offset + li
 		y := r.Y + li
 		line := lines[abs]
 		label := ll.LabelFor(abs)
-		isAnchor := abs == anchor
+		inSel := anchor >= 0 && abs >= lo && abs <= hi
 		contentStyle := styleNone
-		if isAnchor {
-			contentStyle = styleInverse
+		if inSel {
+			contentStyle = styleSel
+			if abs == cursor {
+				contentStyle = styleInverse
+			}
 		}
 		x := r.X
 		if label != "" {
@@ -263,9 +285,9 @@ func PaintLineMode(s *Screen, r Rect, text string, ll *LineLabels, prefix string
 			}
 		}
 		x = s.WriteString(x, y, line, contentStyle, maxX)
-		if isAnchor { // extend the highlight across the rect width
+		if inSel { // extend the highlight across the rect width
 			for ; x < maxX; x++ {
-				s.Set(x, y, ' ', styleInverse)
+				s.Set(x, y, ' ', contentStyle)
 			}
 		}
 	}
@@ -399,9 +421,11 @@ func helpLines(cfg Config) []string {
 	add("   space          switch to line mode")
 	add("   [              copy mode")
 	add(" line mode (whole lines)")
-	add("   label          select the anchor line")
-	add("   enter / same   copy the anchor line")
-	add("   other label    copy the range between the two lines")
+	add("   label            select the first line (anchor)")
+	add("   j k / ↑ ↓        extend the selection up / down")
+	add("   another label    jump the other end to that line")
+	add("   enter            copy the selected line(s)")
+	add("   esc              clear selection (again to quit)")
 	add(" copy mode ( [ or the copy-mode action; scrollback included )")
 	add("   h j k l / arrows  move      w b e  words     { }  paragraphs")
 	add("   0 ^ $   line      g G  top/bottom   ctrl+f/b page  ctrl+u/d half")
@@ -467,10 +491,11 @@ func tokenFooter(prefix string) string {
 	return footer
 }
 
-func lineFooter(prefix string, anchor int) string {
+func lineFooter(prefix string, anchor, cursor int) string {
 	footer := " line mode: type a label · space: token mode · ? help · esc to cancel"
 	if anchor >= 0 {
-		footer = " enter/same label: copy this line · another label: copy range · esc: cancel"
+		lo, hi := selRange(anchor, cursor)
+		footer = fmt.Sprintf(" %d line(s) selected · j/k ↑↓: extend · label: jump · enter: copy · esc: clear", hi-lo+1)
 	} else if prefix != "" {
 		footer = " " + prefix + "_ ·" + footer
 	}
@@ -487,11 +512,11 @@ func Render(w io.Writer, screen string, cands []Candidate, lm *LabelMap, prefix 
 }
 
 // RenderLines paints one full-screen line-mode frame.
-func RenderLines(w io.Writer, screen string, ll *LineLabels, prefix string, anchor, width, height int, cfg Config) {
+func RenderLines(w io.Writer, screen string, ll *LineLabels, prefix string, anchor, cursor, width, height int, cfg Config) {
 	s := NewScreen(width, height)
 	_, view := viewWindow(len(strings.Split(screen, "\n")), height)
-	PaintLineMode(s, Rect{X: 0, Y: 0, W: width, H: view}, screen, ll, prefix, anchor)
-	PaintFooter(s, lineFooter(prefix, anchor))
+	PaintLineMode(s, Rect{X: 0, Y: 0, W: width, H: view}, screen, ll, prefix, anchor, cursor)
+	PaintFooter(s, lineFooter(prefix, anchor, cursor))
 	s.Flush(w, sgrTable(cfg))
 }
 
