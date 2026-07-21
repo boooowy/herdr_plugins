@@ -35,7 +35,14 @@ type uiView struct {
 	cands        []Candidate
 	lm           *LabelMap
 	content      Rect
-	ll           *LineLabels
+	// paintRect is the rect the pane's base content was actually painted at
+	// (composite: comp.target, un-clamped). Token mode overlays labels onto
+	// that pre-painted content, so it must map lines with the SAME offset the
+	// base used — content is clamped for the footer, which would otherwise
+	// shift the labels off their content. Line/copy mode repaint their own
+	// content into `content` and stay self-consistent.
+	paintRect Rect
+	ll        *LineLabels
 }
 
 // layoutFromEnv decodes the pre-overlay layout snapshot the action captured.
@@ -104,12 +111,14 @@ func buildUIView(client *herdrClient, target string, lay *paneLayoutResult, cfg 
 
 	if v.comp != nil {
 		v.content = v.comp.target
+		v.paintRect = v.comp.target // the rect buildComposite painted the base at
 		if v.content.Y+v.content.H > h-1 {
 			v.content.H = h - 1 - v.content.Y
 		}
 	} else {
 		_, view := viewWindow(len(v.lines), h)
 		v.content = Rect{X: 0, Y: 0, W: w, H: view}
+		v.paintRect = v.content
 	}
 	lineOffset := 0
 	if len(v.lines) > v.content.H {
@@ -249,7 +258,7 @@ func runUI() {
 			PaintFooter(frame, copyFooter(cs))
 		case mode == modeToken:
 			frame = v.base.Clone()
-			PaintTokenOverlay(frame, v.content, v.text, v.cands, v.lm, prefix)
+			PaintTokenOverlay(frame, v.paintRect, v.text, v.cands, v.lm, prefix)
 			PaintFooter(frame, tokenFooter(prefix))
 		default:
 			frame = v.base.Clone()
@@ -295,6 +304,9 @@ func runUI() {
 				return
 			case ActYank:
 				copyAndConfirm(client, yanked, cfg)
+				if cfg.FlashMs > 0 {
+					flashAndDwell(out, sgr, cfg.FlashMs, flashFrameCopy(v, cs, copyStyled))
+				}
 				return
 			}
 			continue
@@ -331,6 +343,9 @@ func runUI() {
 				} else {
 					copyAndConfirm(client, RangeText(v.lines, anchor, cursor), cfg)
 				}
+				if cfg.FlashMs > 0 {
+					flashAndDwell(out, sgr, cfg.FlashMs, flashFrameLine(v, anchor, cursor))
+				}
 				return
 			}
 		case k.Kind == KeyRune:
@@ -343,6 +358,9 @@ func runUI() {
 			if mode == modeToken {
 				if picked, ok := v.lm.Exact(prefix); ok {
 					copyAndConfirm(client, picked, cfg)
+					if cfg.FlashMs > 0 {
+						flashAndDwell(out, sgr, cfg.FlashMs, flashFrameToken(v, picked))
+					}
 					return
 				}
 				if !v.lm.HasPrefix(prefix) {

@@ -20,6 +20,8 @@ type Config struct {
 	MatchFg       string          `toml:"match_fg"`
 	SelBg         string          `toml:"sel_bg"`
 	SearchBg      string          `toml:"search_bg"`
+	FlashBg       string          `toml:"flash_bg"` // copy confirmation flash
+	FlashMs       int             `toml:"flash_ms"` // flash duration; 0 disables
 	ScrollbackLines int           `toml:"scrollback_lines"`
 	BorderFg      string          `toml:"border_fg"`       // composite pane borders
 	BorderFocusFg string          `toml:"border_focus_fg"` // target pane's border
@@ -48,6 +50,8 @@ func defaultConfig() Config {
 		MatchFg:         "green",
 		SelBg:           "blue",
 		SearchBg:        "magenta",
+		FlashBg:         "#FF8C00",
+		FlashMs:         150,
 		ScrollbackLines: 5000,
 		BorderFg:        "#444477", // the user-facing docs call these out as
 		BorderFocusFg:   "#bd93f9", // theme approximations (dracula-ish)
@@ -79,6 +83,15 @@ func loadConfig() Config {
 	}
 	if cfg.ScrollbackLines <= 0 {
 		cfg.ScrollbackLines = defaultConfig().ScrollbackLines
+	}
+	// flash_ms: 0 disables the flash on purpose; a negative value is a typo so
+	// fall back to the default, and cap the dwell so a bad value cannot freeze
+	// the overlay open.
+	if cfg.FlashMs < 0 {
+		cfg.FlashMs = defaultConfig().FlashMs
+	}
+	if cfg.FlashMs > 1000 {
+		cfg.FlashMs = 1000
 	}
 	return cfg
 }
