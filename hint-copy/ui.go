@@ -336,7 +336,7 @@ func runUI() {
 		case mode == modeLine && anchor >= 0 && (k.Kind == KeyUp || (k.Kind == KeyRune && k.R == 'k')):
 			cursor = v.ll.PrevLine(cursor) // vim-style extend up
 			prefix = ""
-		case k.Kind == KeyEnter:
+		case k.Kind == KeyEnter || (mode == modeLine && anchor >= 0 && k.Kind == KeyRune && unicode.ToLower(k.R) == 'y'):
 			if mode == modeLine && anchor >= 0 {
 				if anchor == cursor {
 					copyAndConfirm(client, SingleLineText(v.lines, anchor), cfg)

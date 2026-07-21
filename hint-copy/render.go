@@ -424,7 +424,7 @@ func helpLines(cfg Config) []string {
 	add("   label            select the first line (anchor)")
 	add("   j k / ↑ ↓        extend the selection up / down")
 	add("   another label    jump the other end to that line")
-	add("   enter            copy the selected line(s)")
+	add("   y / enter        copy the selected line(s)")
 	add("   esc              clear selection (again to quit)")
 	add(" copy mode ( [ or the copy-mode action; scrollback included )")
 	add("   h j k l / arrows  move      w b e  words     { }  paragraphs")
@@ -495,7 +495,7 @@ func lineFooter(prefix string, anchor, cursor int) string {
 	footer := " line mode: type a label · space: token mode · ? help · esc to cancel"
 	if anchor >= 0 {
 		lo, hi := selRange(anchor, cursor)
-		footer = fmt.Sprintf(" %d line(s) selected · j/k ↑↓: extend · label: jump · enter: copy · esc: clear", hi-lo+1)
+		footer = fmt.Sprintf(" %d line(s) selected · j/k ↑↓: extend · label: jump · y/enter: copy · esc: clear", hi-lo+1)
 	} else if prefix != "" {
 		footer = " " + prefix + "_ ·" + footer
 	}
