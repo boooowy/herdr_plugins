@@ -57,6 +57,31 @@ func TestAssignLineLabelsTwoCharWhenMany(t *testing.T) {
 	}
 }
 
+func TestLineLabelsNextPrevLine(t *testing.T) {
+	// Lines 1 and 2 are blank/unlabeled; hops skip them and clamp at the ends.
+	lines := []string{"first", "", "  \r", "second", "third"}
+	ll := AssignLineLabels(lines, 0, len(lines), defaultConfig())
+
+	if got := ll.NextLine(0); got != 3 {
+		t.Errorf("NextLine(0) = %d, want 3 (skip blanks)", got)
+	}
+	if got := ll.NextLine(3); got != 4 {
+		t.Errorf("NextLine(3) = %d, want 4", got)
+	}
+	if got := ll.NextLine(4); got != 4 {
+		t.Errorf("NextLine(4) = %d, want 4 (clamp at bottom)", got)
+	}
+	if got := ll.PrevLine(4); got != 3 {
+		t.Errorf("PrevLine(4) = %d, want 3", got)
+	}
+	if got := ll.PrevLine(3); got != 0 {
+		t.Errorf("PrevLine(3) = %d, want 0 (skip blanks)", got)
+	}
+	if got := ll.PrevLine(0); got != 0 {
+		t.Errorf("PrevLine(0) = %d, want 0 (clamp at top)", got)
+	}
+}
+
 func TestSingleLineTextTrimsBothEnds(t *testing.T) {
 	lines := []string{"  go build -o bin/x .  "}
 	if got := SingleLineText(lines, 0); got != "go build -o bin/x ." {

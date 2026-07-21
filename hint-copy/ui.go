@@ -175,6 +175,7 @@ func runUI() {
 	}
 	prefix := ""
 	anchor := -1
+	cursor := -1
 	help := false
 	var cs *CopyState
 	var copyStyled [][]Cell
@@ -253,8 +254,8 @@ func runUI() {
 		default:
 			frame = v.base.Clone()
 			clearRect(frame, v.content)
-			PaintLineModeStyled(frame, v.content, v.targetStyled, v.ll, prefix, anchor)
-			PaintFooter(frame, lineFooter(prefix, anchor))
+			PaintLineModeStyled(frame, v.content, v.targetStyled, v.ll, prefix, anchor, cursor)
+			PaintFooter(frame, lineFooter(prefix, anchor, cursor))
 		}
 		frame.Flush(out, sgr)
 		out.Flush()
@@ -274,7 +275,7 @@ func runUI() {
 				cs.W, cs.H = v.content.W, v.content.H
 				cs.scrollToCursor()
 			}
-			prefix, anchor = "", -1
+			prefix, anchor, cursor = "", -1, -1
 			continue
 		case k, ok = <-keyCh:
 			if !ok {
@@ -300,6 +301,9 @@ func runUI() {
 		}
 
 		switch {
+		case k.Kind == KeyEsc && mode == modeLine && anchor >= 0:
+			// Staged Esc: clear the selection first, quit on the next Esc.
+			prefix, anchor, cursor = "", -1, -1
 		case k.Kind == KeyEsc || (k.Kind == KeyCtrl && k.R == 'c'):
 			return
 		case k.Kind == KeyRune && k.R == '?':
@@ -313,10 +317,20 @@ func runUI() {
 			} else {
 				mode = modeToken
 			}
-			prefix, anchor = "", -1
+			prefix, anchor, cursor = "", -1, -1
+		case mode == modeLine && anchor >= 0 && (k.Kind == KeyDown || (k.Kind == KeyRune && k.R == 'j')):
+			cursor = v.ll.NextLine(cursor) // vim-style extend down
+			prefix = ""
+		case mode == modeLine && anchor >= 0 && (k.Kind == KeyUp || (k.Kind == KeyRune && k.R == 'k')):
+			cursor = v.ll.PrevLine(cursor) // vim-style extend up
+			prefix = ""
 		case k.Kind == KeyEnter:
 			if mode == modeLine && anchor >= 0 {
-				copyAndConfirm(client, SingleLineText(v.lines, anchor), cfg)
+				if anchor == cursor {
+					copyAndConfirm(client, SingleLineText(v.lines, anchor), cfg)
+				} else {
+					copyAndConfirm(client, RangeText(v.lines, anchor, cursor), cfg)
+				}
 				return
 			}
 		case k.Kind == KeyRune:
@@ -337,15 +351,10 @@ func runUI() {
 			} else {
 				if line, ok := v.ll.Exact(prefix); ok {
 					prefix = ""
-					switch {
-					case anchor < 0:
-						anchor = line // first label: set the anchor, keep going
-					case line == anchor:
-						copyAndConfirm(client, SingleLineText(v.lines, anchor), cfg)
-						return
-					default:
-						copyAndConfirm(client, RangeText(v.lines, anchor, line), cfg)
-						return
+					if anchor < 0 {
+						anchor, cursor = line, line // first label: set the anchor
+					} else {
+						cursor = line // jump the moving end; enter confirms
 					}
 				} else if !v.ll.HasPrefix(prefix) {
 					prefix = ""
