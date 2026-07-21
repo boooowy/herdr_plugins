@@ -22,6 +22,7 @@ const (
 	styleSel
 	styleCursor
 	styleSearch
+	styleFlash
 )
 
 // sgrTable builds the SGR sequence for each style from the user config.
@@ -35,6 +36,9 @@ func sgrTable(cfg Config) map[StyleID]string {
 		styleSel:     "\x1b[" + colorCode(cfg.SelBg, true) + "m",
 		styleCursor:  "\x1b[7m",
 		styleSearch:  "\x1b[" + colorCode(cfg.SearchBg, true) + "m",
+		// bold + background so the copy-confirmation flash still reads as a
+		// change even when flash_bg equals sel_bg (the steady selection color).
+		styleFlash: "\x1b[1;" + colorCode(cfg.FlashBg, true) + "m",
 	}
 }
 

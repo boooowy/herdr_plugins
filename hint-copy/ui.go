@@ -295,6 +295,9 @@ func runUI() {
 				return
 			case ActYank:
 				copyAndConfirm(client, yanked, cfg)
+				if cfg.FlashMs > 0 {
+					flashAndDwell(out, sgr, cfg.FlashMs, flashFrameCopy(v, cs, copyStyled))
+				}
 				return
 			}
 			continue
@@ -331,6 +334,9 @@ func runUI() {
 				} else {
 					copyAndConfirm(client, RangeText(v.lines, anchor, cursor), cfg)
 				}
+				if cfg.FlashMs > 0 {
+					flashAndDwell(out, sgr, cfg.FlashMs, flashFrameLine(v, anchor, cursor))
+				}
 				return
 			}
 		case k.Kind == KeyRune:
@@ -343,6 +349,9 @@ func runUI() {
 			if mode == modeToken {
 				if picked, ok := v.lm.Exact(prefix); ok {
 					copyAndConfirm(client, picked, cfg)
+					if cfg.FlashMs > 0 {
+						flashAndDwell(out, sgr, cfg.FlashMs, flashFrameToken(v, picked))
+					}
 					return
 				}
 				if !v.lm.HasPrefix(prefix) {

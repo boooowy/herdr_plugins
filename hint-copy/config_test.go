@@ -15,6 +15,9 @@ func TestLoadConfigDefaultsWhenUnset(t *testing.T) {
 	if cfg.ScrollbackLines != 5000 || cfg.SelBg != "blue" || cfg.SearchBg != "magenta" {
 		t.Errorf("bad copy-mode defaults: %+v", cfg)
 	}
+	if cfg.FlashBg != "#FF8C00" || cfg.FlashMs != 150 {
+		t.Errorf("bad flash defaults: %+v", cfg)
+	}
 	if !cfg.patternEnabled("url") || cfg.patternEnabled("ipv6") {
 		t.Error("default pattern toggles wrong")
 	}
@@ -47,6 +50,28 @@ regex = '[A-Z]+-\d+'
 	}
 	if len(cfg.CustomPatterns) != 1 || cfg.CustomPatterns[0].Name != "jira" {
 		t.Errorf("custom patterns: %+v", cfg.CustomPatterns)
+	}
+}
+
+func TestLoadConfigFlashMsClamp(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"flash_ms = 0", 0},       // 0 disables the flash on purpose
+		{"flash_ms = -5", 150},    // a negative typo falls back to the default
+		{"flash_ms = 2000", 1000}, // capped so a bad value cannot freeze the overlay
+		{"flash_ms = 80", 80},     // an in-range value is kept as-is
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(c.in), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("HERDR_PLUGIN_CONFIG_DIR", dir)
+		if got := loadConfig().FlashMs; got != c.want {
+			t.Errorf("%q: FlashMs = %d, want %d", c.in, got, c.want)
+		}
 	}
 }
 
