@@ -25,22 +25,23 @@ func flashAndDwell(out *bufio.Writer, sgr map[StyleID]string, ms int, frame *Scr
 // span walk mirrors PaintTokenOverlay so wide/CJK runes light the right cells.
 func flashFrameToken(v *uiView, picked string) *Screen {
 	f := v.base.Clone()
+	r := v.paintRect // match the rect the base content was painted at
 	lines := strings.Split(v.text, "\n")
 	offset := 0
-	if len(lines) > v.content.H {
-		offset = len(lines) - v.content.H
+	if len(lines) > r.H {
+		offset = len(lines) - r.H
 	}
-	maxX := v.content.X + v.content.W
+	maxX := r.X + r.W
 	for _, c := range v.cands {
 		if c.Text != picked {
 			continue
 		}
-		if c.Line < offset || c.Line-offset >= v.content.H || c.Line >= len(lines) {
+		if c.Line < offset || c.Line-offset >= r.H || c.Line >= len(lines) {
 			continue
 		}
-		y := v.content.Y + c.Line - offset
+		y := r.Y + c.Line - offset
 		runes := []rune(lines[c.Line])
-		x := v.content.X
+		x := r.X
 		for i := 0; i < c.StartRune && i < len(runes); i++ {
 			x += runewidth.RuneWidth(runes[i])
 		}

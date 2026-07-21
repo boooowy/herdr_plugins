@@ -30,11 +30,12 @@ func TestFlashFrameTokenLightsCandidate(t *testing.T) {
 		t.Fatal("expected a candidate")
 	}
 	v := &uiView{
-		base:    NewScreen(80, 24),
-		text:    text,
-		cands:   cands,
-		lm:      AssignLabels(cands, cfg),
-		content: Rect{X: 0, Y: 0, W: 80, H: 23},
+		base:      NewScreen(80, 24),
+		text:      text,
+		cands:     cands,
+		lm:        AssignLabels(cands, cfg),
+		content:   Rect{X: 0, Y: 0, W: 80, H: 23},
+		paintRect: Rect{X: 0, Y: 0, W: 80, H: 23},
 	}
 	c := cands[0] // "/tmp/x.log" starting at rune 4
 	f := flashFrameToken(v, c.Text)
@@ -68,11 +69,12 @@ func TestFlashFrameTokenOnlyPicked(t *testing.T) {
 		t.Fatalf("expected both candidates, got %+v", cands)
 	}
 	v := &uiView{
-		base:    NewScreen(80, 24),
-		text:    text,
-		cands:   cands,
-		lm:      AssignLabels(cands, cfg),
-		content: Rect{X: 0, Y: 0, W: 80, H: 23},
+		base:      NewScreen(80, 24),
+		text:      text,
+		cands:     cands,
+		lm:        AssignLabels(cands, cfg),
+		content:   Rect{X: 0, Y: 0, W: 80, H: 23},
+		paintRect: Rect{X: 0, Y: 0, W: 80, H: 23},
 	}
 	f := flashFrameToken(v, a.Text)
 	if f.at(a.StartRune, 0).Style != styleFlash {
