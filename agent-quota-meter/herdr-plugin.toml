@@ -1,0 +1,38 @@
+id = "boooowy.agent-quota"
+name = "Agent Quota Meter"
+version = "0.2.0"
+min_herdr_version = "0.7.0"
+description = "Show Claude Code / Codex rate-limit usage and per-pane context meters on agent sidebar rows."
+platforms = ["macos", "linux"]
+
+[[events]]
+on = "pane.agent_detected"
+command = ["bash", "on_event.sh"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["bash", "on_event.sh"]
+
+[[events]]
+on = "workspace.focused"
+command = ["bash", "on_event.sh"]
+
+[[events]]
+on = "pane.closed"
+command = ["bash", "on_event.sh"]
+
+[[actions]]
+id = "refresh"
+title = "Quota: refresh now"
+command = ["bash", "on_event.sh", "--force"]
+
+[[actions]]
+id = "open-dashboard"
+title = "Quota: open dashboard"
+command = ["bash", "open_dashboard.sh"]
+
+[[panes]]
+id = "dashboard"
+title = "Agent Quota"
+placement = "overlay"
+command = ["bash", "dashboard.sh"]
