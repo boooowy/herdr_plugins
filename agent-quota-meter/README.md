@@ -4,7 +4,7 @@ Herdr の Agents サイドバーに、Claude Code / Codex のコンテキスト�
 レートリミット残量を表示するプラグインです。
 
 - plugin ID: `boooowy.agent-quota`
-- version: `0.2.0`
+- version: `0.3.0`
 - platforms: macOS / Linux
 
 ## 表示
@@ -46,7 +46,8 @@ context使用率とquota残量は、通常・注意・警告・危険の4段階�
 
 - Herdr 0.7.0 以上。カスタムトークン表示は 0.7.4 以上を推奨
 - macOS または Linux
-- `python3`。`jq` などの追加依存は不要
+- Go 1.26.4以上（インストール時のplugin buildに使用）
+- 実行時にPython、Bash、`jq`などの追加依存は不要
 - Claude Code の quota 表示: Claude Code にログイン済みであること
 - Codex の quota 表示: `~/.codex/sessions` に `rate_limits` の記録があること
 
@@ -64,7 +65,7 @@ herdr plugin install boooowy/herdr_plugins/agent-quota-meter
 
 ```bash
 cd /path/to/herdr_plugins/agent-quota-meter
-herdr plugin link "$PWD"
+make plugin-link
 ```
 
 `~/.config/herdr/config.toml` に Agents サイドバーの行テンプレートを追加します。
@@ -164,7 +165,7 @@ Codex はセッションが報告する `model_context_window` を使用しま�
 
 - Codex: 最近の session JSONL にある `rate_limits` をローカルで集計
 - Claude Code: Anthropic OAuth usage API から取得
-- `update.sh` の実行は60秒デバウンス
+- quota collectorの実行は60秒デバウンス
 - Claude Code の成功データは5分キャッシュ
 - Claude Code で有効な成功データがない状態の取得失敗は、10分間再試行しない
 - Claude Code の一時的な失敗では、30分以内の直近成功データを維持する
@@ -188,15 +189,13 @@ ticker は現在のキャッシュ値をサイドバーへ報告してから quo
 
 | ファイル | 役割 |
 |---|---|
-| `herdr-plugin.toml` | plugin metadata、events、actions、dashboard paneの定義 |
-| `on_event.sh` | event/actionの入口。tickerを起動またはwakeし、quota収集へ渡す |
-| `context_ticker.sh` | tickerのsingleton lockとstale lock回収 |
-| `context_ticker.py` | agent状態の監視、context計算、metadata報告、quota収集の制御 |
-| `update.sh` | 60秒デバウンスとClaude/Codex collectorの呼び出し |
-| `collect_claude.sh` | Keychainまたはcredentials fileを使ったClaude Code quota取得 |
-| `collect_codex.sh` | Codex session JSONLからquotaを集計 |
-| `open_dashboard.sh` | dashboard overlayを開く |
-| `dashboard.sh` | quota使用率を30秒ごとに再描画 |
+| `herdr-plugin.toml` | plugin build、events、actions、dashboard paneの定義 |
+| `main.go` | 単一バイナリのsubcommand入口 |
+| `ticker.go` / `sessions.go` | agent監視、context計算、metadata報告、sessionログ読取 |
+| `collect.go` / `state.go` | Claude/Codex quota収集、デバウンス、state JSON管理 |
+| `lock.go` | tickerのsingleton lock、stale/旧Python ticker回収 |
+| `dashboard.go` | dashboard overlayの表示と操作 |
+| `scripts/build.sh` | pluginインストール時のGo build |
 
 ## Quota ダッシュボード
 
@@ -261,6 +260,15 @@ herdr plugin action invoke refresh --plugin boooowy.agent-quota
 ```
 
 Herdr の起動元で `AGENT_QUOTA_ASCII=1` を設定する方法にも対応しています。
+
+## 開発
+
+```bash
+make test         # go test -race ./...
+make vet          # go vet ./...
+make build        # ./bin/agent-quota-meter にビルド
+make plugin-link  # ビルドしてherdrへ登録
+```
 
 ## トラブルシューティング
 
