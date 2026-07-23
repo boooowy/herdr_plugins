@@ -236,8 +236,14 @@ Herdr から起動した場合は `HERDR_PLUGIN_STATE_DIR` に保存します。
 | `claude.json` | Claude Code quota と取得状態 |
 | `codex.json` | Codex quota と取得状態 |
 | `last_update` | 60秒デバウンス用timestamp |
-| `ticker.lock/pid` | ticker のPIDとheartbeat |
 | `ascii` | 存在する場合はPac-ManをASCII表示に切り替え |
+
+ticker の singleton lock は plugin ID に依存しない
+`~/.cache/herdr-agent-quota/ticker.lock/pid` に保存します。1行目がPID、2行目が
+所有するplugin IDです。plugin IDを変更しても新しいtickerが旧tickerを停止して
+lockを引き継ぐため、複数のPac-Man更新が競合しません。テストや特殊な起動環境では
+`AGENT_QUOTA_RUNTIME_DIR` でruntime directoryを変更できます。初回移行時は
+現IDのstate directoryと旧 `ntj.agent-quota` のlockも安全に回収します。
 
 ## 既知の制限
 
@@ -286,8 +292,8 @@ agentで一度promptを実行し、session JSONLにusage / token_countを記録�
 tickerのPIDは次のコマンドで確認できます。
 
 ```bash
-STATE_DIR=~/.local/state/herdr/plugins/boooowy.agent-quota
-ps -p "$(sed -n '1p' "$STATE_DIR/ticker.lock/pid")"
+RUNTIME_DIR=~/.cache/herdr-agent-quota
+ps -p "$(sed -n '1p' "$RUNTIME_DIR/ticker.lock/pid")"
 ```
 
 ## アンインストール
