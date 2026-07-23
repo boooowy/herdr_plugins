@@ -125,16 +125,12 @@ func (a *app) runTicker() error {
 			var args []string
 			setAny := false
 			if hasPercent {
-				value := contextText(percent)
-				if isWorking {
-					value = renderPacman(percent, frame, true, ascii)
-				}
-				args = append(args, "--token", "context="+value)
-				args = append(args, styledTokenArgs("context", contextStyleLevel(percent), value)...)
+				args = append(args, contextTokenArgs(percent, frame, isWorking, ascii)...)
 				setAny = true
 				reportedContext[agent.PaneID] = true
 			} else if reportedContext[agent.PaneID] {
 				args = append(args, "--clear-token", "context")
+				args = append(args, "--clear-token", "context_pacman")
 				args = append(args, styledTokenArgs("context", "", "")...)
 				delete(reportedContext, agent.PaneID)
 			}

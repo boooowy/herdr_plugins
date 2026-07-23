@@ -12,7 +12,7 @@ Herdr の Agents サイドバーに、Claude Code / Codex のコンテキスト�
 ```text
 ▼ Agents
  ● herdr-agent-quota · codex
-   40%   ᗧ········ᗣ
+   40% ・ ᗧ········ᗣ
    1m: 92% left
  ● my-other-repo · claude
    ctx 16%
@@ -29,7 +29,9 @@ Herdr の Agents サイドバーに、Claude Code / Codex のコンテキスト�
 | `unknown` | 非表示 | 非表示 |
 
 `working` の Pac-Man は約11秒で左から右へ進み、コンテキスト使用率と
-agent の稼働状態を同時に表します。Pac-Man は `working` の間だけ表示され、
+agent の稼働状態を同時に表します。使用率の数値だけがコンテキスト使用量に
+応じて段階着色され、区切りの `・`、Pac-Man、餌は常に黄色です。
+Pac-Man は `working` の間だけ表示され、
 完了後の5分間は静的な `ctx N%` 表示になります。サイドバーの quota は使用可能な残量です。
 
 context使用率とquota残量は、通常・注意・警告・危険の4段階で
@@ -79,6 +81,7 @@ rows = [
     { token = "$context_caution", fg = "#f1fa8c", bold = true, dim = false },
     { token = "$context_warning", fg = "#ffb86c", bold = true, dim = false },
     { token = "$context_danger",  fg = "#ff5555", bold = true, dim = false },
+    { token = "$context_pacman",  fg = "#f1fa8c", bold = true, dim = false },
   ],
   [
     { token = "$quota_1_normal",  fg = "#50fa7b", bold = true, dim = false },
@@ -108,8 +111,10 @@ rows = [
 row_gap = 0
 ```
 
-各段階では4つの候補tokenのうち1つだけに値が入り、段階が変わると以前のtokenを
-明示的に消去します。`dim = false` は、親のスタイルから薄い表示を継承しないための指定です。
+各段階では4つの候補tokenのうち1つだけに使用率が入り、段階が変わると以前のtokenを
+明示的に消去します。`$context_pacman` は `working` の間だけ値が入り、
+黄色固定で区切りの `・`、Pac-Man、餌を表示します。`dim = false` は、
+親のスタイルから薄い表示を継承しないための指定です。
 既存設定との互換性のため、pluginは従来の `$context` / `$quota` も引き続きreportします。
 
 値のないカスタムトークンだけの行は省略されるため、状態や取得データに応じて

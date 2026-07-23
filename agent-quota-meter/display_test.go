@@ -75,6 +75,32 @@ func TestStyledTokenArgsOnlySetActiveLevel(t *testing.T) {
 	}
 }
 
+func TestWorkingContextSeparatesPercentAndPacmanTokens(t *testing.T) {
+	args := contextTokenArgs(82, 0, true, true)
+	for _, wanted := range []optionPair{
+		{"--token", "context=82% C..........@"},
+		{"--token", "context_warning=82%"},
+		{"--token", "context_pacman=・ C..........@"},
+	} {
+		if !hasPair(args, wanted) {
+			t.Errorf("missing pair %#v from %#v", wanted, optionPairs(args))
+		}
+	}
+}
+
+func TestStaticContextClearsPacmanToken(t *testing.T) {
+	args := contextTokenArgs(82, 0, false, true)
+	for _, wanted := range []optionPair{
+		{"--token", "context=ctx 82%"},
+		{"--token", "context_warning=ctx 82%"},
+		{"--clear-token", "context_pacman"},
+	} {
+		if !hasPair(args, wanted) {
+			t.Errorf("missing pair %#v from %#v", wanted, optionPairs(args))
+		}
+	}
+}
+
 func TestRenderQuotaWindowsKeepsOrderAndStyles(t *testing.T) {
 	display := renderQuotaWindows([]quotaWindow{
 		{Label: "5h", UsedPercent: floatPointer(67)},
@@ -213,7 +239,19 @@ func TestPacmanASCIIAndContextText(t *testing.T) {
 	if got := renderPacman(37, 0, true, true); got != "37% C..........@" {
 		t.Errorf("ASCII pacman = %q", got)
 	}
+	if got := renderPacmanToken(0, true, true); got != "・ C..........@" {
+		t.Errorf("ASCII pacman token = %q", got)
+	}
 	if got := contextText(37); got != "ctx 37%" {
 		t.Errorf("context text = %q", got)
+	}
+	if got := contextPercentText(37); got != "37%" {
+		t.Errorf("context percent text = %q", got)
+	}
+}
+
+func TestClearDisplayTokensIncludesPacman(t *testing.T) {
+	if !hasPair(clearDisplayTokenArgs(), optionPair{"--clear-token", "context_pacman"}) {
+		t.Error("context_pacman is not cleared with the other display tokens")
 	}
 }

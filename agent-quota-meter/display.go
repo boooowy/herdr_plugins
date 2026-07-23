@@ -37,6 +37,17 @@ func asciiMode(stateDir string) bool {
 }
 
 func renderPacman(percent float64, frame int, animate bool, ascii bool) string {
+	return fmt.Sprintf("%.0f%% %s",
+		clamp(percent, 0, 999),
+		renderPacmanBody(frame, animate, ascii),
+	)
+}
+
+func renderPacmanToken(frame int, animate bool, ascii bool) string {
+	return "・ " + renderPacmanBody(frame, animate, ascii)
+}
+
+func renderPacmanBody(frame int, animate bool, ascii bool) string {
 	mouthOpen, mouthClosed, dot, ghost := "ᗧ", "●", "·", "ᗣ"
 	if ascii {
 		mouthOpen, mouthClosed, dot, ghost = "C", "O", ".", "@"
@@ -49,9 +60,7 @@ func renderPacman(percent float64, frame int, animate bool, ascii bool) string {
 			pacman = mouthClosed
 		}
 	}
-	shown := clamp(percent, 0, 999)
-	return fmt.Sprintf("%.0f%% %s%s%s%s",
-		shown,
+	return fmt.Sprintf("%s%s%s%s",
 		strings.Repeat(" ", position),
 		pacman,
 		strings.Repeat(dot, pacmanCells-position),
@@ -61,6 +70,27 @@ func renderPacman(percent float64, frame int, animate bool, ascii bool) string {
 
 func contextText(percent float64) string {
 	return fmt.Sprintf("ctx %.0f%%", clamp(percent, 0, 999))
+}
+
+func contextPercentText(percent float64) string {
+	return fmt.Sprintf("%.0f%%", clamp(percent, 0, 999))
+}
+
+func contextTokenArgs(percent float64, frame int, working, ascii bool) []string {
+	legacyValue := contextText(percent)
+	styledValue := legacyValue
+	if working {
+		legacyValue = renderPacman(percent, frame, true, ascii)
+		styledValue = contextPercentText(percent)
+	}
+	args := []string{"--token", "context=" + legacyValue}
+	args = append(args, styledTokenArgs("context", contextStyleLevel(percent), styledValue)...)
+	if working {
+		args = append(args, "--token", "context_pacman="+renderPacmanToken(frame, true, ascii))
+	} else {
+		args = append(args, "--clear-token", "context_pacman")
+	}
+	return args
 }
 
 func contextStyleLevel(percent float64) string {
@@ -103,7 +133,7 @@ func styledTokenArgs(prefix, activeLevel, value string) []string {
 }
 
 func allDisplayTokens() []string {
-	tokens := []string{"context", "quota"}
+	tokens := []string{"context", "context_pacman", "quota"}
 	for _, level := range styleLevels {
 		tokens = append(tokens, "context_"+level)
 	}
