@@ -27,9 +27,15 @@ HERDR = os.environ.get("HERDR_BIN_PATH", "herdr")
 STATE_DIR = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.expanduser(
     "~/.cache/herdr-agent-quota"
 )
-LOCKDIR = os.path.join(STATE_DIR, "ticker.lock")
+RUNTIME_DIR = os.environ.get("AGENT_QUOTA_RUNTIME_DIR") or os.path.expanduser(
+    "~/.cache/herdr-agent-quota"
+)
+LOCKDIR = os.path.join(RUNTIME_DIR, "ticker.lock")
 PIDFILE = os.path.join(LOCKDIR, "pid")
 SOURCE = "boooowy.agent-quota"
+LOCK_STALE_SEC = 120
+LOCK_TAKEOVER_WAIT_SEC = 3
+LOCK_POLL_SEC = 0.1
 
 ANIM_TICK = 1  # working pane のアニメーション再生中
 ACTIVE_TICK = 5  # 誰かが working の間の更新間隔(秒)
@@ -402,30 +408,180 @@ def codex_percent(cwd):
 
 
 # --- lifecycle ------------------------------------------------------------
+def read_lock_record(pidfile=None):
+    """共有lockの所有PIDとplugin IDを返す。旧形式はowner=Noneとして扱う。"""
+    pidfile = PIDFILE if pidfile is None else pidfile
+    try:
+        with open(pidfile) as fh:
+            lines = fh.read().splitlines()
+        pid = int(lines[0])
+        owner = lines[1].strip() if len(lines) >= 2 and lines[1].strip() else None
+        return pid, owner
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def pid_is_alive(pid):
+    """権限不足は生存扱いにして、他プロセスを誤回収しない。"""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def lock_is_healthy(record, pidfile=None, now=None):
+    pidfile = PIDFILE if pidfile is None else pidfile
+    if record is None or not pid_is_alive(record[0]):
+        return False
+    try:
+        heartbeat_age = (time.time() if now is None else now) - os.path.getmtime(
+            pidfile
+        )
+    except OSError:
+        return False
+    return heartbeat_age < LOCK_STALE_SEC
+
+
+def remove_lock(expected_pid=None, lockdir=None, pidfile=None):
+    """所有者が変わっていないlockだけを狭く回収する。"""
+    lockdir = LOCKDIR if lockdir is None else lockdir
+    pidfile = PIDFILE if pidfile is None else pidfile
+    record = read_lock_record(pidfile)
+    if expected_pid is None:
+        # mkdir直後でpid未記録の競合相手がいる場合、空dirのrmdirだけを試す。
+        if record is not None or os.path.exists(pidfile):
+            return False
+    else:
+        if record is None or record[0] != expected_pid:
+            return False
+        try:
+            os.remove(pidfile)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+    try:
+        os.rmdir(lockdir)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    return not os.path.exists(lockdir)
+
+
+def stop_lock_owner(pid, lockdir=None, pidfile=None):
+    """lock所有者をgraceful stopし、同じ所有者のlockだけを回収する。"""
+    lockdir = LOCKDIR if lockdir is None else lockdir
+    pidfile = PIDFILE if pidfile is None else pidfile
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except (PermissionError, OSError):
+        return False
+
+    deadline = time.monotonic() + LOCK_TAKEOVER_WAIT_SEC
+    while os.path.exists(lockdir) and time.monotonic() < deadline:
+        current = read_lock_record(pidfile)
+        if current is not None and current[0] != pid:
+            return False  # 別の起動プロセスが先に引き継いだ
+        if not pid_is_alive(pid):
+            remove_lock(pid, lockdir, pidfile)
+            break
+        time.sleep(LOCK_POLL_SEC)
+    return not os.path.exists(lockdir)
+
+
+def legacy_lockdirs():
+    """共有lock導入前の現IDと既知の旧IDが使ったlockを返す。"""
+    state_parent = os.path.dirname(STATE_DIR)
+    candidates = (
+        os.path.join(STATE_DIR, "ticker.lock"),
+        os.path.join(state_parent, "ntj.agent-quota", "ticker.lock"),
+    )
+    shared = os.path.abspath(LOCKDIR)
+    return tuple(
+        path
+        for path in dict.fromkeys(candidates)
+        if os.path.abspath(path) != shared
+    )
+
+
+def retire_legacy_locks():
+    """旧state配下で動き続けるtickerを停止してから共有lockへ移行する。"""
+    for lockdir in legacy_lockdirs():
+        if not os.path.exists(lockdir):
+            continue
+        pidfile = os.path.join(lockdir, "pid")
+        record = read_lock_record(pidfile)
+        if lock_is_healthy(record, pidfile):
+            if not stop_lock_owner(record[0], lockdir, pidfile):
+                return False
+        else:
+            expected_pid = record[0] if record is not None else None
+            if not remove_lock(expected_pid, lockdir, pidfile):
+                return False
+    return True
+
+
+def acquire_lock():
+    """ID非依存のsingleton lockを取得し、別IDの旧tickerから引き継ぐ。"""
+    if not retire_legacy_locks():
+        return False
+    try:
+        os.makedirs(RUNTIME_DIR, exist_ok=True)
+    except OSError:
+        return False
+
+    for _ in range(3):
+        try:
+            os.mkdir(LOCKDIR)
+        except FileExistsError:
+            record = read_lock_record()
+            if lock_is_healthy(record):
+                pid, owner = record
+                # owner不明の旧形式は、PID再利用時の誤停止を避けて触らない。
+                if owner is None or owner == SOURCE:
+                    return False
+                if not stop_lock_owner(pid):
+                    return False
+            else:
+                expected_pid = record[0] if record is not None else None
+                if not remove_lock(expected_pid):
+                    return False
+            continue
+        except OSError:
+            return False
+
+        try:
+            with open(PIDFILE, "x") as fh:
+                fh.write(f"{os.getpid()}\n{SOURCE}\n")
+            return True
+        except OSError:
+            remove_lock()
+            return False
+    return False
+
+
 def cleanup_lock():
     # ロックが自分のものである場合のみ片付ける(stale回収で奪われた後に壊さない)
-    try:
-        with open(PIDFILE) as fh:
-            if int(fh.read().strip()) != os.getpid():
-                return
-    except (OSError, ValueError):
-        return
-    try:
-        os.remove(PIDFILE)
-        os.rmdir(LOCKDIR)
-    except OSError:
-        pass
+    remove_lock(os.getpid())
 
 
 def heartbeat():
     """pid を touch して生存を示す。ロックを奪われていたら False。"""
+    record = read_lock_record()
+    if record is None or record[0] != os.getpid():
+        return False
     try:
-        with open(PIDFILE) as fh:
-            if int(fh.read().strip()) != os.getpid():
-                return False
         os.utime(PIDFILE, None)
         return True
-    except (OSError, ValueError):
+    except OSError:
         return False
 
 
@@ -461,6 +617,8 @@ def interruptible_sleep(timeout, wake_fd):
 
 
 def main():
+    if not acquire_lock():
+        return
     atexit.register(cleanup_lock)
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, lambda *_: sys.exit(0))

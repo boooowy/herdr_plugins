@@ -1,4 +1,10 @@
+import os
+import tempfile
+import time
 import unittest
+from unittest import mock
+
+import context_ticker as ticker
 
 from context_ticker import (
     IDLE_GRACE_SEC,
@@ -119,6 +125,87 @@ class ReportChunkingTest(unittest.TestCase):
     def test_malformed_report_args_are_rejected(self):
         with self.assertRaises(ValueError):
             split_report_args(["--clear-token"])
+
+
+class TickerLockTest(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.original_paths = (
+            ticker.STATE_DIR,
+            ticker.RUNTIME_DIR,
+            ticker.LOCKDIR,
+            ticker.PIDFILE,
+        )
+        ticker.STATE_DIR = os.path.join(self.tempdir.name, "boooowy.agent-quota")
+        ticker.RUNTIME_DIR = self.tempdir.name
+        ticker.LOCKDIR = os.path.join(self.tempdir.name, "ticker.lock")
+        ticker.PIDFILE = os.path.join(ticker.LOCKDIR, "pid")
+
+    def tearDown(self):
+        ticker.cleanup_lock()
+        (
+            ticker.STATE_DIR,
+            ticker.RUNTIME_DIR,
+            ticker.LOCKDIR,
+            ticker.PIDFILE,
+        ) = self.original_paths
+        self.tempdir.cleanup()
+
+    def write_lock(self, pid, owner=ticker.SOURCE, age=0):
+        os.mkdir(ticker.LOCKDIR)
+        with open(ticker.PIDFILE, "w") as fh:
+            fh.write(f"{pid}\n{owner}\n")
+        if age:
+            old = time.time() - age
+            os.utime(ticker.PIDFILE, (old, old))
+
+    def test_new_lock_records_pid_and_plugin_id(self):
+        self.assertTrue(ticker.acquire_lock())
+        self.assertEqual(ticker.read_lock_record(), (os.getpid(), ticker.SOURCE))
+
+    def test_same_plugin_does_not_start_twice(self):
+        self.write_lock(os.getpid())
+
+        self.assertFalse(ticker.acquire_lock())
+
+    def test_different_plugin_is_stopped_and_replaced(self):
+        old_pid = 12345
+        self.write_lock(old_pid, "ntj.agent-quota")
+
+        def fake_kill(pid, sig):
+            self.assertEqual(pid, old_pid)
+            if sig == ticker.signal.SIGTERM:
+                os.remove(ticker.PIDFILE)
+                os.rmdir(ticker.LOCKDIR)
+
+        with mock.patch.object(ticker.os, "kill", side_effect=fake_kill):
+            self.assertTrue(ticker.acquire_lock())
+        self.assertEqual(ticker.read_lock_record(), (os.getpid(), ticker.SOURCE))
+
+    def test_legacy_state_lock_is_stopped_before_shared_lock(self):
+        legacy_lockdir = os.path.join(ticker.STATE_DIR, "ticker.lock")
+        legacy_pidfile = os.path.join(legacy_lockdir, "pid")
+        old_pid = 12345
+        os.makedirs(legacy_lockdir)
+        with open(legacy_pidfile, "w") as fh:
+            fh.write(f"{old_pid}\n")
+
+        def fake_kill(pid, sig):
+            self.assertEqual(pid, old_pid)
+            if sig == ticker.signal.SIGTERM:
+                os.remove(legacy_pidfile)
+                os.rmdir(legacy_lockdir)
+
+        with mock.patch.object(ticker.os, "kill", side_effect=fake_kill):
+            self.assertTrue(ticker.acquire_lock())
+        self.assertFalse(os.path.exists(legacy_lockdir))
+        self.assertEqual(ticker.read_lock_record(), (os.getpid(), ticker.SOURCE))
+
+    def test_stale_lock_is_reclaimed_without_stopping_pid(self):
+        self.write_lock(os.getpid(), "ntj.agent-quota", ticker.LOCK_STALE_SEC + 1)
+
+        self.assertTrue(ticker.acquire_lock())
+        self.assertEqual(ticker.read_lock_record(), (os.getpid(), ticker.SOURCE))
 
 
 class IdleGraceTest(unittest.TestCase):
