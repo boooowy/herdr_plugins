@@ -18,7 +18,7 @@ const envLayout = "HINTCOPY_LAYOUT"
 // pane must travel explicitly.
 const envTargetPane = "HINTCOPY_TARGET_PANE_ID"
 
-const pluginID = "kayakatu.hint-copy"
+const pluginID = "boooowy.hint-copy"
 
 // runAction is the keybinding entrypoint. It runs server-side (no terminal):
 // resolve the focused pane, make sure there is something to copy, then ask
