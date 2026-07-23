@@ -34,13 +34,13 @@ herdr plugin install boooowy/herdr_plugins/hint-copy
 [[keys.command]]
 key = "prefix+y"
 type = "plugin_action"
-command = "kayakatu.hint-copy.copy"
+command = "boooowy.hint-copy.copy"
 description = "hint-copy: pick and copy"
 
 [[keys.command]]
 key = "cmd+alt+8"
 type = "plugin_action"
-command = "kayakatu.hint-copy.copy-mode"
+command = "boooowy.hint-copy.copy-mode"
 description = "hint-copy: copy mode (scrollback)"
 ```
 
@@ -73,7 +73,7 @@ description = "hint-copy: copy mode (scrollback)"
 
 ### copyモード(vim風選択+スクロールバック)
 
-オーバーレイ内で `[`、または `kayakatu.hint-copy.copy-mode` アクション(キーバインド例: `cmd+alt+8`)で直接起動。herdr 本体の copy モードと同じキー感覚で、スクロールバック(既定5000行、`scrollback_lines` で変更可)を遡ってコピーできます。
+オーバーレイ内で `[`、または `boooowy.hint-copy.copy-mode` アクション(キーバインド例: `cmd+alt+8`)で直接起動。herdr 本体の copy モードと同じキー感覚で、スクロールバック(既定5000行、`scrollback_lines` で変更可)を遡ってコピーできます。
 
 | キー | 動作 |
 | --- | --- |
@@ -120,7 +120,7 @@ copyモード中の `?` は後方検索です(ヘルプはトークン/行モー
 
 ## 設定
 
-`~/.config/herdr/plugins/config/kayakatu.hint-copy/config.toml`(無ければデフォルトで動作):
+`~/.config/herdr/plugins/config/boooowy.hint-copy/config.toml`(無ければデフォルトで動作):
 
 ```toml
 alphabet = "asdfghjklqwertyuiopzxcvb"  # ラベルに使うキー(ホームロー優先)
@@ -165,6 +165,6 @@ make plugin-link  # ビルドして herdr に登録
 デバッグ:
 
 ```sh
-herdr plugin action invoke copy --plugin kayakatu.hint-copy   # キーなしで起動
-herdr plugin log list --plugin kayakatu.hint-copy             # stdout/stderr を確認
+herdr plugin action invoke copy --plugin boooowy.hint-copy   # キーなしで起動
+herdr plugin log list --plugin boooowy.hint-copy             # stdout/stderr を確認
 ```
