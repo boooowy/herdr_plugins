@@ -29,7 +29,7 @@ STATE_DIR = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.expanduser(
 )
 LOCKDIR = os.path.join(STATE_DIR, "ticker.lock")
 PIDFILE = os.path.join(LOCKDIR, "pid")
-SOURCE = "ntj.agent-quota"
+SOURCE = "boooowy.agent-quota"
 
 ANIM_TICK = 1  # working pane のアニメーション再生中
 ACTIVE_TICK = 5  # 誰かが working の間の更新間隔(秒)

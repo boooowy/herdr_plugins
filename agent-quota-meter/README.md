@@ -3,7 +3,7 @@
 Herdr の Agents サイドバーに、Claude Code / Codex のコンテキスト使用量と
 レートリミット残量を表示するプラグインです。
 
-- plugin ID: `ntj.agent-quota`
+- plugin ID: `boooowy.agent-quota`
 - version: `0.2.0`
 - platforms: macOS / Linux
 
@@ -119,7 +119,7 @@ row_gap = 0
 
 ```bash
 herdr server reload-config
-herdr plugin action invoke refresh --plugin ntj.agent-quota
+herdr plugin action invoke refresh --plugin boooowy.agent-quota
 ```
 
 以降は次のイベントで ticker の起動と即時再描画が行われます。
@@ -203,7 +203,7 @@ ticker は現在のキャッシュ値をサイドバーへ報告してから quo
 コマンドパレットの **Quota: open dashboard**、または次のコマンドで開きます。
 
 ```bash
-herdr plugin action invoke open-dashboard --plugin ntj.agent-quota
+herdr plugin action invoke open-dashboard --plugin boooowy.agent-quota
 ```
 
 ```text
@@ -228,7 +228,7 @@ herdr plugin action invoke open-dashboard --plugin ntj.agent-quota
 ## 状態ファイル
 
 Herdr から起動した場合は `HERDR_PLUGIN_STATE_DIR` に保存します。通常は
-`~/.local/state/herdr/plugins/ntj.agent-quota` です。Herdr 外で直接実行した場合は
+`~/.local/state/herdr/plugins/boooowy.agent-quota` です。Herdr 外で直接実行した場合は
 `~/.cache/herdr-agent-quota` を使用します。
 
 | パス | 内容 |
@@ -250,8 +250,8 @@ Herdr から起動した場合は `HERDR_PLUGIN_STATE_DIR` に保存します。
 `ᗧ` や `ᗣ` が表示できないフォントではASCIIモードを利用できます。
 
 ```bash
-touch ~/.local/state/herdr/plugins/ntj.agent-quota/ascii
-herdr plugin action invoke refresh --plugin ntj.agent-quota
+touch ~/.local/state/herdr/plugins/boooowy.agent-quota/ascii
+herdr plugin action invoke refresh --plugin boooowy.agent-quota
 ```
 
 Herdr の起動元で `AGENT_QUOTA_ASCII=1` を設定する方法にも対応しています。
@@ -261,8 +261,8 @@ Herdr の起動元で `AGENT_QUOTA_ASCII=1` を設定する方法にも対応し
 ### 表示されない
 
 ```bash
-herdr plugin action invoke refresh --plugin ntj.agent-quota
-herdr plugin log list --plugin ntj.agent-quota --limit 10
+herdr plugin action invoke refresh --plugin boooowy.agent-quota
+herdr plugin log list --plugin boooowy.agent-quota --limit 10
 ```
 
 `idle` / `unknown` の agent は仕様上、contextとquotaを表示しません。
@@ -286,14 +286,14 @@ agentで一度promptを実行し、session JSONLにusage / token_countを記録�
 tickerのPIDは次のコマンドで確認できます。
 
 ```bash
-STATE_DIR=~/.local/state/herdr/plugins/ntj.agent-quota
+STATE_DIR=~/.local/state/herdr/plugins/boooowy.agent-quota
 ps -p "$(sed -n '1p' "$STATE_DIR/ticker.lock/pid")"
 ```
 
 ## アンインストール
 
 ```bash
-herdr plugin unlink ntj.agent-quota
+herdr plugin unlink boooowy.agent-quota
 ```
 
 `~/.config/herdr/config.toml` の `[ui.sidebar.agents]` を削除し、設定を再読み込みします。

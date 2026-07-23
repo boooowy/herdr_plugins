@@ -93,7 +93,7 @@ req = urllib.request.Request(
         "Authorization": f"Bearer {token}",
         "anthropic-beta": "oauth-2025-04-20",
         "Content-Type": "application/json",
-        "User-Agent": "ntj-agent-quota/0.1",
+        "User-Agent": "boooowy-agent-quota/0.1",
     },
 )
 try:
