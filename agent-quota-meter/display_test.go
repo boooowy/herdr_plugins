@@ -79,11 +79,26 @@ func TestWorkingContextSeparatesPercentAndPacmanTokens(t *testing.T) {
 	args := contextTokenArgs(82, 0, true, true)
 	for _, wanted := range []optionPair{
 		{"--token", "context=82% C..........@"},
-		{"--token", "context_warning=82%"},
+		{"--token", "context_warning=82% " + zeroWidthSpace},
 		{"--token", "context_pacman=・ C..........@"},
 	} {
 		if !hasPair(args, wanted) {
 			t.Errorf("missing pair %#v from %#v", wanted, optionPairs(args))
+		}
+	}
+}
+
+func TestWorkingContextPercentUsesFixedWidth(t *testing.T) {
+	for _, test := range []struct {
+		percent float64
+		want    string
+	}{
+		{percent: 5, want: "5%  " + zeroWidthSpace},
+		{percent: 23, want: "23% " + zeroWidthSpace},
+		{percent: 100, want: "100%" + zeroWidthSpace},
+	} {
+		if got := contextPercentText(test.percent); got != test.want {
+			t.Errorf("contextPercentText(%v) = %q, want %q", test.percent, got, test.want)
 		}
 	}
 }
@@ -245,7 +260,7 @@ func TestPacmanASCIIAndContextText(t *testing.T) {
 	if got := contextText(37); got != "ctx 37%" {
 		t.Errorf("context text = %q", got)
 	}
-	if got := contextPercentText(37); got != "37%" {
+	if got := contextPercentText(37); got != "37% "+zeroWidthSpace {
 		t.Errorf("context percent text = %q", got)
 	}
 }
