@@ -14,6 +14,8 @@ const (
 	maxQuotaSlots            = 5
 	maxTokenPatchesPerReport = 16
 	pacmanCells              = 10
+	// Herdr trims token-edge spaces, so this preserves fixed-width padding.
+	zeroWidthSpace = "\u200b"
 )
 
 var styleLevels = []string{"normal", "caution", "warning", "danger"}
@@ -73,7 +75,8 @@ func contextText(percent float64) string {
 }
 
 func contextPercentText(percent float64) string {
-	return fmt.Sprintf("%.0f%%", clamp(percent, 0, 999))
+	value := fmt.Sprintf("%.0f%%", clamp(percent, 0, 999))
+	return fmt.Sprintf("%-4s%s", value, zeroWidthSpace)
 }
 
 func contextTokenArgs(percent float64, frame int, working, ascii bool) []string {
