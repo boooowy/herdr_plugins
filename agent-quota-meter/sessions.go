@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -78,8 +80,13 @@ func tailLines(path string, state *tailState) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	state.Position = size
-	return bytes.Split(chunk, []byte{'\n'}), nil
+	end := bytes.LastIndexByte(chunk, '\n')
+	if end < 0 {
+		// No complete line yet; carry the partial line over to the next read.
+		return nil, nil
+	}
+	state.Position += int64(end) + 1
+	return bytes.Split(chunk[:end], []byte{'\n'}), nil
 }
 
 func (reader *sessionReader) claudePercent(sessionID string) (float64, bool) {
@@ -134,7 +141,8 @@ func (reader *sessionReader) claudePercent(sessionID string) (float64, bool) {
 		}
 		if json.Unmarshal(line, &record) != nil ||
 			record.Type != "assistant" ||
-			record.IsSidechain {
+			record.IsSidechain ||
+			record.Message.Model == "<synthetic>" {
 			continue
 		}
 		var raw struct {
@@ -161,23 +169,28 @@ func (reader *sessionReader) claudePercent(sessionID string) (float64, bool) {
 	return used / claudeContextWindow(state.Model) * 100, true
 }
 
+var modelGenRe = regexp.MustCompile(`(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?`)
+
 func claudeContextWindow(model string) float64 {
 	lower := strings.ToLower(model)
 	if strings.Contains(lower, "[1m]") {
 		return 1_000_000
 	}
-	for _, marker := range []string{
-		"fable",
-		"mythos",
-		"sonnet-5",
-		"opus-4-6",
-		"opus-4-7",
-		"opus-4-8",
-		"sonnet-4-6",
-	} {
-		if strings.Contains(lower, marker) {
-			return 1_000_000
-		}
+	match := modelGenRe.FindStringSubmatch(lower)
+	if match == nil {
+		return 200_000
+	}
+	family := match[1]
+	gen, _ := strconv.Atoi(match[2])
+	minor := 0
+	if match[3] != "" {
+		minor, _ = strconv.Atoi(match[3])
+	}
+	if family == "haiku" {
+		return 200_000
+	}
+	if gen >= 5 || (gen == 4 && minor >= 6) {
+		return 1_000_000
 	}
 	return 200_000
 }

@@ -29,11 +29,49 @@ func TestClaudePercentUsesLatestMainAssistantUsage(t *testing.T) {
 }
 
 func TestClaudeContextWindowMarkers(t *testing.T) {
-	if got := claudeContextWindow("claude-opus-4-6"); got != 1_000_000 {
-		t.Errorf("1M model window = %v", got)
+	cases := []struct {
+		model string
+		want  float64
+	}{
+		{"claude-opus-5", 1_000_000},
+		{"claude-opus-4-6", 1_000_000},
+		{"claude-opus-4-8", 1_000_000},
+		{"claude-sonnet-5", 1_000_000},
+		{"claude-fable-5", 1_000_000},
+		{"claude-opus-6", 1_000_000},
+		{"claude-sonnet-4-5", 200_000},
+		{"claude-haiku-4-5-20251001", 200_000},
+		{"<synthetic>", 200_000},
+		{"claude-sonnet-4-5[1m]", 1_000_000},
 	}
-	if got := claudeContextWindow("claude-sonnet-4-5"); got != 200_000 {
-		t.Errorf("legacy model window = %v", got)
+	for _, testCase := range cases {
+		if got := claudeContextWindow(testCase.model); got != testCase.want {
+			t.Errorf("claudeContextWindow(%q) = %v, want %v", testCase.model, got, testCase.want)
+		}
+	}
+}
+
+func TestClaudePercentSkipsSyntheticEntries(t *testing.T) {
+	home := t.TempDir()
+	sessionID := "session-synthetic"
+	dir := filepath.Join(home, ".claude", "projects", "project")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, sessionID+".jsonl")
+	content := "" +
+		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-5","usage":{"input_tokens":2,"cache_creation_input_tokens":4,"cache_read_input_tokens":492813}}}` + "\n" +
+		`{"type":"assistant","isSidechain":false,"message":{"model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reader := newSessionReader(home, time.Now)
+	percent, ok := reader.claudePercent(sessionID)
+	if !ok {
+		t.Fatal("claudePercent returned not ok")
+	}
+	if percent < 49 || percent > 50 {
+		t.Errorf("Claude percent = %v, want ~49.3 (492819/1M)", percent)
 	}
 }
 
@@ -79,5 +117,33 @@ func TestTailLinesResetsAfterTruncation(t *testing.T) {
 	}
 	if string(lines[0]) != "new" {
 		t.Errorf("lines = %#v", lines)
+	}
+}
+
+func TestTailLinesCarriesOverPartialLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tail.jsonl")
+	if err := os.WriteFile(path, []byte("first\npart"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := &tailState{}
+	lines, err := tailLines(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 || string(lines[0]) != "first" {
+		t.Fatalf("first read lines = %#v", lines)
+	}
+	if state.Position != int64(len("first\n")) {
+		t.Fatalf("position = %d, want %d", state.Position, len("first\n"))
+	}
+	if err := os.WriteFile(path, []byte("first\npartial\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines, err = tailLines(path, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 1 || string(lines[0]) != "partial" {
+		t.Fatalf("second read lines = %#v", lines)
 	}
 }

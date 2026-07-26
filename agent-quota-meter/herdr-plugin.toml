@@ -1,6 +1,6 @@
 id = "boooowy.agent-quota"
 name = "Agent Quota Meter"
-version = "0.3.0"
+version = "0.3.1"
 min_herdr_version = "0.7.0"
 description = "Show Claude Code / Codex rate-limit usage and per-pane context meters on agent sidebar rows."
 platforms = ["macos", "linux"]
