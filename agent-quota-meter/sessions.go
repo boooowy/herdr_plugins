@@ -189,6 +189,11 @@ func claudeContextWindow(model string) float64 {
 	if family == "haiku" {
 		return 200_000
 	}
+	// 旧命名は家族名の直後が日付になる (claude-3-opus-20240229)。
+	// 3桁以上は世代ではなく日付とみなす。
+	if gen > 99 {
+		return 200_000
+	}
 	if gen >= 5 || (gen == 4 && minor >= 6) {
 		return 1_000_000
 	}
