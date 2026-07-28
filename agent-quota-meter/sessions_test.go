@@ -38,11 +38,15 @@ func TestClaudeContextWindowMarkers(t *testing.T) {
 		{"claude-opus-4-8", 1_000_000},
 		{"claude-sonnet-5", 1_000_000},
 		{"claude-fable-5", 1_000_000},
+		{"claude-mythos-5", 1_000_000},
 		{"claude-opus-6", 1_000_000},
 		{"claude-sonnet-4-5", 200_000},
 		{"claude-haiku-4-5-20251001", 200_000},
+		{"claude-haiku-5", 200_000},
+		{"claude-3-opus-20240229", 200_000},
 		{"<synthetic>", 200_000},
 		{"claude-sonnet-4-5[1m]", 1_000_000},
+		{"claude-opus-5[1m]", 1_000_000},
 	}
 	for _, testCase := range cases {
 		if got := claudeContextWindow(testCase.model); got != testCase.want {

@@ -70,6 +70,10 @@ cd /path/to/herdr_plugins/agent-quota-meter
 make plugin-link
 ```
 
+すでにプラグインを動かしている状態で更新した場合は、常駐中の ticker を入れ替えないと
+表示に反映されません。[プラグイン更新を ticker に反映する](#プラグイン更新を-ticker-に反映する)
+を参照してください。
+
 `~/.config/herdr/config.toml` に Agents サイドバーの行テンプレートを追加します。
 
 ```toml
@@ -152,9 +156,18 @@ Claude Code の quota 取得では、Keychain の `Claude Code-credentials` か�
   `~/.codex/sessions/**/rollout-*.jsonl` の `session_meta.cwd` を対応付け、
   最後の `token_count` を使用
 
-Claude Code の分母はモデル名から判定します。`[1m]`、Fable、Mythos、Sonnet 5、
-Opus 4.6 / 4.7 / 4.8、Sonnet 4.6 は1M、それ以外は200kです。
-Codex はセッションが報告する `model_context_window` を使用します。
+Claude Code の分母は、モデル名を世代としてパースして判定します。上から順に評価します。
+
+1. モデル名に `[1m]` を含む → 1M
+2. Haiku → 世代を問わず 200k
+3. 世代番号が3桁以上 → 200k（`claude-3-opus-20240229` のように家族名の直後が
+   日付になる旧命名を、日付とみなして除外するため）
+4. 世代5以上、または 4.6 以上 → 1M（Opus 5 / Fable 5 / Mythos 5 / Sonnet 5、
+   Opus 4.6 / 4.7 / 4.8、Sonnet 4.6 など）
+5. 上記以外、およびモデル名をパースできない場合 → 200k
+
+個別のモデル名ではなく世代で判定するため、新しいモデルが追加されても
+そのまま追随します。Codex はセッションが報告する `model_context_window` を使用します。
 
 表示の再計算間隔は次のとおりです。
 
@@ -189,6 +202,36 @@ ticker は現在のキャッシュ値をサイドバーへ報告してから quo
 
 5分の通常TTLにより、quota収集中の一時停止でサイドバー行が消えて再描画されることを
 防ぎます。
+
+### プラグイン更新を ticker に反映する
+
+`make plugin-link` や `herdr plugin install` はバイナリを置き換えますが、
+**常駐中の ticker プロセスはその場では入れ替わりません**。ロックを保持している ticker が
+healthy な間、新しく起動した ticker はロックを取れずに即終了するためです
+（`herdr plugin disable` → `enable` でも ticker は落ちません）。
+
+反映方法は3通りあります。
+
+| 方法 | 反映まで | 挙動 |
+|---|---|---|
+| 何もしない | 最大10分 | 全 agent が非 `working` の状態が10分続くと ticker が終了し、次のイベントで新バイナリが起動 |
+| `herdr server stop` して herdr を起動し直す | 5〜10秒 | ticker は `herdr agent list` が2回連続で失敗すると自ら終了する（リトライ間隔5秒）。herdr を止めるとこの経路で落ちる |
+| ticker を止めて refresh | 即時 | 下記コマンド |
+
+```bash
+pkill -f 'agent-quota-meter ticker'
+herdr plugin action invoke refresh --plugin boooowy.agent-quota
+```
+
+ticker は setsid でherdrのプロセスグループから切り離して起動するため、
+herdr を停止してもプロセスが直接終了するわけではありません。上記のとおり
+`herdr agent list` の連続失敗を検知して自ら終了します。
+
+反映されたかどうかは、ticker の起動時刻がバイナリのビルド時刻より後かで判断できます。
+
+```bash
+ps -eo pid,lstart,command | grep '[a]gent-quota-meter ticker'
+```
 
 ## 構成
 
