@@ -312,10 +312,17 @@ func uiLoop(client *herdrClient, target string, lay *paneLayoutResult, cfg Confi
 			clearRect(frame, v.content)
 			PaintCopyMode(frame, v.content, cs, copyStyled)
 			PaintFooter(frame, copyFooter(cs))
-		case mode == modeToken || mode == modeWord:
+		case mode == modeToken:
 			frame = v.base.Clone()
 			PaintTokenOverlay(frame, v.paintRect, d.text, cands, lm, prefix)
-			PaintFooter(frame, tokenFooter(prefix, lm, mode == modeWord))
+			PaintFooter(frame, tokenFooter(prefix, lm, false))
+		case mode == modeWord:
+			// Word mode inserts labels before the words instead of covering
+			// them, so it repaints the target pane like line mode does.
+			frame = v.base.Clone()
+			clearRect(frame, v.content)
+			PaintWordInsert(frame, v.content, d.targetStyled, cands, lm, prefix)
+			PaintFooter(frame, tokenFooter(prefix, lm, true))
 		default:
 			frame = v.base.Clone()
 			clearRect(frame, v.content)

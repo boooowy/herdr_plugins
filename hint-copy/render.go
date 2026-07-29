@@ -120,10 +120,13 @@ func PaintTokenOverlay(s *Screen, r Rect, text string, cands []Candidate, lm *La
 		}
 		if label != "" {
 			st := styleHint
+			consumed := 0
 			if !active {
 				st = styleDim
+			} else {
+				consumed = len(prefix) // typed keys reveal the content beneath
 			}
-			placeLabel(s, r, y, x, cx, label, st)
+			placeLabel(s, r, y, x, cx, label, consumed, st)
 		}
 	}
 }
@@ -132,7 +135,11 @@ func PaintTokenOverlay(s *Screen, r Rect, text string, cands []Candidate, lm *La
 // over the span's leading cells when the span is wide enough (the
 // tmux-thumbs look), otherwise into blank cells just before or after the
 // span, otherwise not at all — the span highlight still marks the candidate.
-func placeLabel(s *Screen, r Rect, y, startX, endX int, label string, st StyleID) {
+// consumed marks how many leading label keys were already typed: those cells
+// revert to the content beneath (reveal-as-you-type) while the remaining
+// keys stay put — placement is decided on the FULL label width so typing
+// never moves a label.
+func placeLabel(s *Screen, r Rect, y, startX, endX int, label string, consumed int, st StyleID) {
 	lw := runewidth.StringWidth(label)
 	var x int
 	switch {
@@ -145,7 +152,84 @@ func placeLabel(s *Screen, r Rect, y, startX, endX int, label string, st StyleID
 	default:
 		return
 	}
+	if consumed > 0 {
+		if consumed >= len(label) {
+			return
+		}
+		label = label[consumed:] // alphabet keys are 1-cell ASCII
+		x += consumed
+	}
 	s.WriteString(x, y, label, st, r.X+r.W)
+}
+
+// PaintWordInsert is the word-mode painter: the target pane's colored
+// content is repainted with each candidate's label INSERTED just before its
+// word, shifting the rest of the line right — every character of the word
+// stays readable (the same trade line mode makes with its label margin).
+// The inserted slot always spans the full label width, so typing a prefix
+// never reflows the layout: ruled-out labels just dim, and an active
+// label's typed keys go dim while the remaining keys stay bold.
+func PaintWordInsert(s *Screen, r Rect, styled [][]Cell, cands []Candidate, lm *LabelMap, prefix string) {
+	offset := 0
+	if len(styled) > r.H {
+		offset = len(styled) - r.H
+	}
+	byLine := make(map[int][]Candidate)
+	for _, c := range cands {
+		byLine[c.Line] = append(byLine[c.Line], c) // ExtractWords emits in StartRune order
+	}
+	maxX := r.X + r.W
+	for li := 0; li < r.H && offset+li < len(styled); li++ {
+		abs := offset + li
+		y := r.Y + li
+		lineCands := byLine[abs]
+		ci := 0
+		x := r.X
+		runeIdx := 0
+		curEnd := -1 // rune end (exclusive) of the span being highlighted
+		curActive := false
+		for _, cell := range styled[abs] {
+			if cell.R == 0 {
+				continue // wide-rune continuation, re-emitted by Set
+			}
+			for ci < len(lineCands) && lineCands[ci].StartRune < runeIdx {
+				ci++ // skip candidates that started inside a clipped region
+			}
+			if ci < len(lineCands) && lineCands[ci].StartRune == runeIdx {
+				c := lineCands[ci]
+				ci++
+				if label := lm.LabelFor(c.Text); label != "" {
+					curActive = prefix == "" || strings.HasPrefix(label, prefix)
+					curEnd = c.EndRune
+					for i, lr := range label {
+						if x >= maxX {
+							break
+						}
+						st := styleDim
+						if curActive && i >= len(prefix) {
+							st = styleHint
+						}
+						s.Set(x, y, lr, st)
+						x++
+					}
+				}
+			}
+			if x >= maxX {
+				break
+			}
+			wdt := runewidth.RuneWidth(cell.R)
+			if x+wdt > maxX {
+				break
+			}
+			st := cell.Style
+			if runeIdx < curEnd && curActive {
+				st = styleMatch
+			}
+			s.Set(x, y, cell.R, st)
+			x += wdt
+			runeIdx++
+		}
+	}
 }
 
 // blankCells reports whether every cell of [x1, x2) on row y is a plain

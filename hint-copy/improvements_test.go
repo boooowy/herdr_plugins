@@ -12,7 +12,7 @@ import (
 func TestPlaceLabelOverLeadingCells(t *testing.T) {
 	s := NewScreen(20, 1)
 	s.WriteString(0, 0, "xyzw/file", styleNone, 20)
-	placeLabel(s, Rect{X: 0, Y: 0, W: 20, H: 1}, 0, 0, 9, "a", styleHint)
+	placeLabel(s, Rect{X: 0, Y: 0, W: 20, H: 1}, 0, 0, 9, "a", 0, styleHint)
 	if got := s.at(0, 0).R; got != 'a' {
 		t.Errorf("label not stamped over the leading cell: %q", got)
 	}
@@ -25,7 +25,7 @@ func TestPlaceLabelOffLeftWhenSpanTooNarrow(t *testing.T) {
 	s := NewScreen(20, 1)
 	s.Set(3, 0, 'x', styleNone) // 1-cell span at x=3, blanks to its left
 	s.Set(4, 0, 'y', styleNone) // neighbor that must survive
-	placeLabel(s, Rect{X: 0, Y: 0, W: 20, H: 1}, 0, 3, 4, "as", styleHint)
+	placeLabel(s, Rect{X: 0, Y: 0, W: 20, H: 1}, 0, 3, 4, "as", 0, styleHint)
 	if s.at(1, 0).R != 'a' || s.at(2, 0).R != 's' {
 		t.Errorf("label not placed off-left: %q%q", s.at(1, 0).R, s.at(2, 0).R)
 	}
@@ -37,7 +37,7 @@ func TestPlaceLabelOffLeftWhenSpanTooNarrow(t *testing.T) {
 func TestPlaceLabelOffRightWhenLeftBlocked(t *testing.T) {
 	s := NewScreen(20, 1)
 	s.WriteString(0, 0, "ab x", styleNone, 20) // span 'x' at 3; left neighbors busy
-	placeLabel(s, Rect{X: 0, Y: 0, W: 20, H: 1}, 0, 3, 4, "as", styleHint)
+	placeLabel(s, Rect{X: 0, Y: 0, W: 20, H: 1}, 0, 3, 4, "as", 0, styleHint)
 	if s.at(4, 0).R != 'a' || s.at(5, 0).R != 's' {
 		t.Errorf("label not placed off-right: %q%q", s.at(4, 0).R, s.at(5, 0).R)
 	}
@@ -49,7 +49,7 @@ func TestPlaceLabelOffRightWhenLeftBlocked(t *testing.T) {
 func TestPlaceLabelSkippedWhenNoRoom(t *testing.T) {
 	s := NewScreen(5, 1)
 	s.WriteString(0, 0, "abxcd", styleNone, 5) // 1-cell span at 2, no blanks anywhere
-	placeLabel(s, Rect{X: 0, Y: 0, W: 5, H: 1}, 0, 2, 3, "as", styleHint)
+	placeLabel(s, Rect{X: 0, Y: 0, W: 5, H: 1}, 0, 2, 3, "as", 0, styleHint)
 	for i, want := range []rune("abxcd") {
 		if got := s.at(i, 0).R; got != want {
 			t.Errorf("cell %d = %q, want %q (label must be dropped, not spill)", i, got, want)
@@ -62,7 +62,7 @@ func TestPlaceLabelRespectsRectEdges(t *testing.T) {
 	// Span at the rect's left edge, too narrow: off-left would leave the rect.
 	s.Set(0, 0, 'x', styleNone)
 	s.Set(1, 0, 'y', styleNone)
-	placeLabel(s, Rect{X: 0, Y: 0, W: 2, H: 1}, 0, 0, 1, "as", styleHint)
+	placeLabel(s, Rect{X: 0, Y: 0, W: 2, H: 1}, 0, 0, 1, "as", 0, styleHint)
 	if s.at(0, 0).R != 'x' || s.at(1, 0).R != 'y' {
 		t.Error("label leaked past the rect edges")
 	}
@@ -239,6 +239,125 @@ func TestBuildCompositeSinglePane(t *testing.T) {
 	}
 	if got := comp.base.at(comp.target.X, comp.target.Y).R; got != 'h' {
 		t.Errorf("pane content not painted at the target rect: %q", got)
+	}
+}
+
+// ---- word mode: labels are inserted, never cover the word ----
+
+func TestWordInsertKeepsAllChars(t *testing.T) {
+	cfg := defaultConfig()
+	text := "git commit now"
+	cands := ExtractWords(text, cfg) // git, commit, now → labels a, s, d
+	lm := AssignLabels(cands, cfg)
+	s := NewScreen(40, 2)
+	PaintWordInsert(s, Rect{X: 0, Y: 0, W: 40, H: 2}, styledFromLines([]string{text}), cands, lm, "")
+	row := strings.Split(flushPlain(s), "\r\n")[0]
+	if row != "agit scommit dnow" {
+		t.Errorf("row = %q, want labels inserted with every word char visible", row)
+	}
+}
+
+func TestWordInsertLayoutFixedWhilePrefixTyped(t *testing.T) {
+	cfg := defaultConfig()
+	text := "git commit now"
+	cands := ExtractWords(text, cfg)
+	lm := &LabelMap{ // 2-char labels so a 1-key prefix narrows without copying
+		byLabel: map[string]string{"as": "git", "sd": "commit", "aa": "now"},
+		byText:  map[string]string{"git": "as", "commit": "sd", "now": "aa"},
+	}
+	styled := styledFromLines([]string{text})
+	idle := NewScreen(40, 2)
+	PaintWordInsert(idle, Rect{X: 0, Y: 0, W: 40, H: 2}, styled, cands, lm, "")
+	typed := NewScreen(40, 2)
+	PaintWordInsert(typed, Rect{X: 0, Y: 0, W: 40, H: 2}, styled, cands, lm, "a")
+
+	// Same runes in every cell: typing must never reflow the layout.
+	for x := 0; x < 40; x++ {
+		if idle.at(x, 0).R != typed.at(x, 0).R {
+			t.Fatalf("cell %d moved after typing: %q → %q", x, idle.at(x, 0).R, typed.at(x, 0).R)
+		}
+	}
+	// "as" (git, active): typed 'a' dims, remaining 's' stays hint-styled.
+	if typed.at(0, 0).Style != styleDim || typed.at(1, 0).Style != styleHint {
+		t.Errorf("active label styles = %d,%d, want dim,hint", typed.at(0, 0).Style, typed.at(1, 0).Style)
+	}
+	// git span (active) highlighted; commit label "sd" (ruled out) fully dim,
+	// its word unhighlighted.
+	if typed.at(2, 0).Style != styleMatch {
+		t.Errorf("active word style = %d, want styleMatch", typed.at(2, 0).Style)
+	}
+	// layout: "as git" = cells 0-4, space 5, "sd" 6-7, "commit" 8-13.
+	if typed.at(6, 0).Style != styleDim || typed.at(7, 0).Style != styleDim {
+		t.Errorf("ruled-out label styles = %d,%d, want dim,dim", typed.at(6, 0).Style, typed.at(7, 0).Style)
+	}
+	if typed.at(8, 0).Style == styleMatch {
+		t.Error("ruled-out word must not stay highlighted")
+	}
+}
+
+func TestWordInsertCJK(t *testing.T) {
+	cfg := defaultConfig()
+	text := "設定する 前に"
+	cands := ExtractWords(text, cfg) // 設定する (4 runes)
+	lm := AssignLabels(cands, cfg)
+	s := NewScreen(40, 2)
+	PaintWordInsert(s, Rect{X: 0, Y: 0, W: 40, H: 2}, styledFromLines([]string{text}), cands, lm, "")
+	row := strings.Split(flushPlain(s), "\r\n")[0]
+	if !strings.Contains(row, "a設定する") {
+		t.Errorf("row = %q, want label inserted before the CJK word", row)
+	}
+}
+
+func TestWordInsertClipsAtRightEdge(t *testing.T) {
+	cfg := defaultConfig()
+	text := "aaa bbb ccc ddd"
+	cands := ExtractWords(text, cfg)
+	lm := AssignLabels(cands, cfg)
+	s := NewScreen(10, 2)
+	PaintWordInsert(s, Rect{X: 0, Y: 0, W: 10, H: 2}, styledFromLines([]string{text}), cands, lm, "")
+	row := strings.Split(flushPlain(s), "\r\n")[0]
+	if len([]rune(row)) > 10 {
+		t.Errorf("row overflows the rect: %q", row)
+	}
+}
+
+// ---- reveal-as-you-type: typed label keys uncover the content beneath ----
+
+func TestOverlayRevealTypedPrefix(t *testing.T) {
+	text := "/tmp/a /tmp/b"
+	cfg := defaultConfig()
+	cands := Extract(text, cfg)
+	lm := &LabelMap{
+		byLabel: map[string]string{"as": "/tmp/a", "sd": "/tmp/b"},
+		byText:  map[string]string{"/tmp/a": "as", "/tmp/b": "sd"},
+	}
+	s := NewScreen(40, 5)
+	PaintTokens(s, Rect{X: 0, Y: 0, W: 40, H: 4}, text, cands, lm, "a")
+	// Active "/tmp/a": the typed 'a' cell reverts to the content ('/'), the
+	// remaining label key 's' stays.
+	if got := s.at(0, 0).R; got != '/' {
+		t.Errorf("typed cell = %q, want the revealed content '/'", got)
+	}
+	if got := s.at(1, 0).R; got != 's' {
+		t.Errorf("remaining label cell = %q, want 's'", got)
+	}
+	// Ruled-out "/tmp/b" keeps its full (dim) label at x=7.
+	if s.at(7, 0).R != 's' || s.at(8, 0).R != 'd' {
+		t.Errorf("ruled-out label = %q%q, want full \"sd\"", s.at(7, 0).R, s.at(8, 0).R)
+	}
+}
+
+func TestPlaceLabelRevealOffLeft(t *testing.T) {
+	s := NewScreen(20, 1)
+	s.Set(3, 0, 'x', styleNone) // 1-cell span at x=3, blanks to its left
+	// Full label "as" would sit at cells 1-2; with 'a' typed only 's' remains
+	// at cell 2 — placement is decided on the full width, so nothing moves.
+	placeLabel(s, Rect{X: 0, Y: 0, W: 20, H: 1}, 0, 3, 4, "as", 1, styleHint)
+	if got := s.at(1, 0).R; got != ' ' {
+		t.Errorf("typed slot cell = %q, want blank", got)
+	}
+	if got := s.at(2, 0).R; got != 's' {
+		t.Errorf("remaining label cell = %q, want 's'", got)
 	}
 }
 
