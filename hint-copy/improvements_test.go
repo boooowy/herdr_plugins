@@ -363,6 +363,30 @@ func TestPlaceLabelRevealOffLeft(t *testing.T) {
 	}
 }
 
+// Word mode ignores max_candidates and caps at the label capacity
+// (alphabet²) — a busy screen easily has >100 unique words, and words
+// beyond the cap silently lost their labels.
+func TestExtractWordsCapsAtLabelCapacityNotMaxCandidates(t *testing.T) {
+	cfg := defaultConfig() // max_candidates = 100, alphabet² = 576
+	var b strings.Builder
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&b, "word%03d\n", i)
+	}
+	out := ExtractWords(b.String(), cfg)
+	if len(out) != 300 {
+		t.Errorf("300 unique words → %d candidates, want all 300 (max_candidates must not apply)", len(out))
+	}
+
+	b.Reset()
+	for i := 0; i < 700; i++ { // beyond 24² = 576
+		fmt.Fprintf(&b, "word%03d\n", i)
+	}
+	out = ExtractWords(b.String(), cfg)
+	if len(out) != 576 {
+		t.Errorf("700 unique words → %d candidates, want the 576 label capacity", len(out))
+	}
+}
+
 // ---- default mode: word unless the config explicitly says "token" ----
 
 func TestDefaultModeIsWord(t *testing.T) {

@@ -326,7 +326,9 @@ func resolveOverlaps(ms []Candidate, pats []pattern) []Candidate {
 // alphanumeric, at least cfg.WordMinLen runes long. It deliberately ignores
 // the token patterns — word mode is the explicit "label everything" escape
 // hatch when no pattern matched what you want — and reuses Candidate so the
-// token-mode painters and label maps work unchanged.
+// token-mode painters and label maps work unchanged. Unlike Extract it caps
+// at the label capacity (alphabet²) instead of max_candidates: labeling
+// everything is the whole point, and an unlabeled word just looks broken.
 func ExtractWords(screen string, cfg Config) []Candidate {
 	minLen := cfg.WordMinLen
 	if minLen <= 0 {
@@ -369,7 +371,8 @@ func ExtractWords(screen string, cfg Config) []Candidate {
 			i = j
 		}
 	}
-	return capUnique(out, cfg.MaxCandidates)
+	n := len([]rune(cfg.Alphabet))
+	return capUnique(out, n*n)
 }
 
 // capUnique limits candidates to the first max unique strings in order;
