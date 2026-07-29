@@ -31,14 +31,11 @@ func TestFlashFrameTokenLightsCandidate(t *testing.T) {
 	}
 	v := &uiView{
 		base:      NewScreen(80, 24),
-		text:      text,
-		cands:     cands,
-		lm:        AssignLabels(cands, cfg),
 		content:   Rect{X: 0, Y: 0, W: 80, H: 23},
 		paintRect: Rect{X: 0, Y: 0, W: 80, H: 23},
 	}
 	c := cands[0] // "/tmp/x.log" starting at rune 4
-	f := flashFrameToken(v, c.Text)
+	f := flashFrameToken(v, text, cands, c.Text)
 
 	if got := f.at(c.StartRune, 0).Style; got != styleFlash {
 		t.Errorf("candidate start cell style = %d, want styleFlash", got)
@@ -70,13 +67,10 @@ func TestFlashFrameTokenOnlyPicked(t *testing.T) {
 	}
 	v := &uiView{
 		base:      NewScreen(80, 24),
-		text:      text,
-		cands:     cands,
-		lm:        AssignLabels(cands, cfg),
 		content:   Rect{X: 0, Y: 0, W: 80, H: 23},
 		paintRect: Rect{X: 0, Y: 0, W: 80, H: 23},
 	}
-	f := flashFrameToken(v, a.Text)
+	f := flashFrameToken(v, text, cands, a.Text)
 	if f.at(a.StartRune, 0).Style != styleFlash {
 		t.Error("picked candidate not flashed")
 	}
@@ -92,13 +86,12 @@ func TestFlashFrameLineLightsRange(t *testing.T) {
 	lines := []string{"one", "two", "three"}
 	ll := AssignLineLabels(lines, 0, 23, cfg)
 	v := &uiView{
-		base:         NewScreen(80, 24),
-		targetStyled: styledFromLines(lines),
-		ll:           ll,
-		content:      Rect{X: 0, Y: 0, W: 80, H: 23},
+		base:    NewScreen(80, 24),
+		ll:      ll,
+		content: Rect{X: 0, Y: 0, W: 80, H: 23},
 	}
 	margin := ll.Width() + 1
-	f := flashFrameLine(v, 0, 1) // select rows 0 and 1
+	f := flashFrameLine(v, styledFromLines(lines), 0, 1) // select rows 0 and 1
 
 	for _, y := range []int{0, 1} {
 		if got := f.at(margin, y).Style; got != styleFlash {

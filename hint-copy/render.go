@@ -62,90 +62,30 @@ func viewWindow(nLines, height int) (offset, view int) {
 	return offset, view
 }
 
-// PaintTokens draws the captured text into r with hint labels replacing the
-// leading cells of each candidate (tmux-thumbs style). Lines render fully
-// left-to-right so wide/CJK characters keep natural alignment; the bottom
-// lines win when the capture is taller than the rect.
+// PaintTokens draws the captured text into r with hint labels on each
+// candidate (tmux-thumbs style): the plain content first, then the same
+// span/label overlay the composite path uses — one code path decides label
+// placement everywhere. Lines render fully left-to-right so wide/CJK
+// characters keep natural alignment; the bottom lines win when the capture
+// is taller than the rect.
 func PaintTokens(s *Screen, r Rect, text string, cands []Candidate, lm *LabelMap, prefix string) {
 	lines := strings.Split(text, "\n")
 	offset := 0
 	if len(lines) > r.H {
 		offset = len(lines) - r.H
 	}
-	byLine := make(map[int][]Candidate)
-	for _, c := range cands {
-		if c.Line >= offset {
-			byLine[c.Line-offset] = append(byLine[c.Line-offset], c)
-		}
-	}
 	for li := 0; li < r.H && offset+li < len(lines); li++ {
-		paintTokenLine(s, r, li, lines[offset+li], byLine[li], lm, prefix)
+		s.WriteString(r.X, r.Y+li, lines[offset+li], styleNone, r.X+r.W)
 	}
+	PaintTokenOverlay(s, r, text, cands, lm, prefix)
 }
 
-// paintTokenLine draws one line at rect row li, overlaying candidate labels.
-// lineCands are sorted by StartRune and non-overlapping (Extract guarantees
-// both); candidate text is ASCII, so a label replaces exactly its rune count.
-func paintTokenLine(s *Screen, r Rect, li int, line string, lineCands []Candidate, lm *LabelMap, prefix string) {
-	runes := []rune(line)
-	maxX := r.X + r.W
-	y := r.Y + li
-	x := r.X
-	i, ci := 0, 0
-	for i < len(runes) && x < maxX {
-		for ci < len(lineCands) && lineCands[ci].StartRune < i {
-			ci++
-		}
-		if ci < len(lineCands) && lineCands[ci].StartRune == i {
-			c := lineCands[ci]
-			ci++
-			matchLen := c.EndRune - c.StartRune
-			j := i
-			if label := lm.LabelFor(c.Text); label != "" {
-				labelStyle := styleHint
-				if prefix != "" && !strings.HasPrefix(label, prefix) {
-					labelStyle = styleDim
-				}
-				skipped := 0
-				for _, lr := range label {
-					if x >= maxX {
-						break
-					}
-					s.Set(x, y, lr, labelStyle)
-					x++
-					if skipped < matchLen {
-						skipped++
-					}
-				}
-				j = i + skipped
-			}
-			for ; j < i+matchLen && j < len(runes); j++ {
-				wdt := runewidth.RuneWidth(runes[j])
-				if x+wdt > maxX {
-					break
-				}
-				s.Set(x, y, runes[j], styleMatch)
-				x += wdt
-			}
-			i += matchLen
-			continue
-		}
-		if runes[i] != '\r' {
-			wdt := runewidth.RuneWidth(runes[i])
-			if x+wdt > maxX {
-				break
-			}
-			s.Set(x, y, runes[i], styleNone)
-			x += wdt
-		}
-		i++
-	}
-}
-
-// PaintTokenOverlay is the composite-mode token painter: the pane's colored
-// content is already in the base frame, so it only restyles each candidate
-// span and stamps the hint label over the leading cells — the tmux-thumbs
-// look on top of the real pane pixels.
+// PaintTokenOverlay restyles each candidate span and stamps its hint label:
+// the tmux-thumbs look on top of the already-painted pane pixels (the
+// composite base, or PaintTokens' plain content). While a prefix is typed,
+// candidates it rules out drop their span highlight entirely — only the
+// still-reachable copy targets stay lit, and their labels' remaining keys
+// stay bold.
 func PaintTokenOverlay(s *Screen, r Rect, text string, cands []Candidate, lm *LabelMap, prefix string) {
 	lines := strings.Split(text, "\n")
 	offset := 0
@@ -162,33 +102,148 @@ func PaintTokenOverlay(s *Screen, r Rect, text string, cands []Candidate, lm *La
 		for i := 0; i < c.StartRune && i < len(runes); i++ {
 			x += runewidth.RuneWidth(runes[i])
 		}
+		label := lm.LabelFor(c.Text)
+		active := prefix == "" || (label != "" && strings.HasPrefix(label, prefix))
 		cx := x
 		for i := c.StartRune; i < c.EndRune && i < len(runes); i++ {
 			wdt := runewidth.RuneWidth(runes[i])
 			if cx+wdt > r.X+r.W {
 				break
 			}
-			s.SetStyle(cx, y, styleMatch)
-			if wdt == 2 {
-				s.SetStyle(cx+1, y, styleMatch)
+			if active { // ruled-out spans keep their original pane colors
+				s.SetStyle(cx, y, styleMatch)
+				if wdt == 2 {
+					s.SetStyle(cx+1, y, styleMatch)
+				}
 			}
 			cx += wdt
 		}
-		if label := lm.LabelFor(c.Text); label != "" {
+		if label != "" {
 			st := styleHint
-			if prefix != "" && !strings.HasPrefix(label, prefix) {
+			consumed := 0
+			if !active {
 				st = styleDim
+			} else {
+				consumed = len(prefix) // typed keys reveal the content beneath
 			}
-			lx := x
-			for _, lr := range label {
-				if lx >= r.X+r.W {
-					break
-				}
-				s.Set(lx, y, lr, st)
-				lx++
-			}
+			placeLabel(s, r, y, x, cx, label, consumed, st)
 		}
 	}
+}
+
+// placeLabel stamps a hint label without spilling onto unrelated content:
+// over the span's leading cells when the span is wide enough (the
+// tmux-thumbs look), otherwise into blank cells just before or after the
+// span, otherwise not at all — the span highlight still marks the candidate.
+// consumed marks how many leading label keys were already typed: those cells
+// revert to the content beneath (reveal-as-you-type) while the remaining
+// keys stay put — placement is decided on the FULL label width so typing
+// never moves a label.
+func placeLabel(s *Screen, r Rect, y, startX, endX int, label string, consumed int, st StyleID) {
+	lw := runewidth.StringWidth(label)
+	var x int
+	switch {
+	case endX-startX >= lw:
+		x = startX
+	case blankCells(s, r, y, startX-lw, startX):
+		x = startX - lw
+	case blankCells(s, r, y, endX, endX+lw):
+		x = endX
+	default:
+		return
+	}
+	if consumed > 0 {
+		if consumed >= len(label) {
+			return
+		}
+		label = label[consumed:] // alphabet keys are 1-cell ASCII
+		x += consumed
+	}
+	s.WriteString(x, y, label, st, r.X+r.W)
+}
+
+// PaintWordInsert is the word-mode painter: the target pane's colored
+// content is repainted with each candidate's label INSERTED just before its
+// word, shifting the rest of the line right — every character of the word
+// stays readable (the same trade line mode makes with its label margin).
+// The inserted slot always spans the full label width, so typing a prefix
+// never reflows the layout: ruled-out labels just dim, and an active
+// label's typed keys go dim while the remaining keys stay bold.
+func PaintWordInsert(s *Screen, r Rect, styled [][]Cell, cands []Candidate, lm *LabelMap, prefix string) {
+	offset := 0
+	if len(styled) > r.H {
+		offset = len(styled) - r.H
+	}
+	byLine := make(map[int][]Candidate)
+	for _, c := range cands {
+		byLine[c.Line] = append(byLine[c.Line], c) // ExtractWords emits in StartRune order
+	}
+	maxX := r.X + r.W
+	for li := 0; li < r.H && offset+li < len(styled); li++ {
+		abs := offset + li
+		y := r.Y + li
+		lineCands := byLine[abs]
+		ci := 0
+		x := r.X
+		runeIdx := 0
+		curEnd := -1 // rune end (exclusive) of the span being highlighted
+		curActive := false
+		for _, cell := range styled[abs] {
+			if cell.R == 0 {
+				continue // wide-rune continuation, re-emitted by Set
+			}
+			for ci < len(lineCands) && lineCands[ci].StartRune < runeIdx {
+				ci++ // skip candidates that started inside a clipped region
+			}
+			if ci < len(lineCands) && lineCands[ci].StartRune == runeIdx {
+				c := lineCands[ci]
+				ci++
+				if label := lm.LabelFor(c.Text); label != "" {
+					curActive = prefix == "" || strings.HasPrefix(label, prefix)
+					curEnd = c.EndRune
+					for i, lr := range label {
+						if x >= maxX {
+							break
+						}
+						st := styleDim
+						if curActive && i >= len(prefix) {
+							st = styleHint
+						}
+						s.Set(x, y, lr, st)
+						x++
+					}
+				}
+			}
+			if x >= maxX {
+				break
+			}
+			wdt := runewidth.RuneWidth(cell.R)
+			if x+wdt > maxX {
+				break
+			}
+			st := cell.Style
+			if runeIdx < curEnd && curActive {
+				st = styleMatch
+			}
+			s.Set(x, y, cell.R, st)
+			x += wdt
+			runeIdx++
+		}
+	}
+}
+
+// blankCells reports whether every cell of [x1, x2) on row y is a plain
+// space inside the rect — safe to host a label without hiding content.
+func blankCells(s *Screen, r Rect, y, x1, x2 int) bool {
+	if x1 < r.X || x2 > r.X+r.W || y < 0 || y >= s.H {
+		return false
+	}
+	for x := x1; x < x2; x++ {
+		if x < 0 || x >= s.W || s.at(x, y).R != ' ' {
+			return false
+		}
+	}
+	return true
 }
 
 // PaintLineModeStyled is the composite-mode line painter: labels in a left
@@ -419,6 +474,7 @@ func helpLines(cfg Config) []string {
 	add(" token mode (URLs, paths, ...)")
 	add("   a s d ...      copy the labeled string")
 	add("   space          switch to line mode")
+	add("   tab            word mode (labels every word)")
 	add("   [              copy mode")
 	add(" line mode (whole lines)")
 	add("   label            select the first line (anchor)")
@@ -483,12 +539,23 @@ func PaintHelp(s *Screen, r Rect, cfg Config) {
 // ---- full-screen wrappers (kept signatures; used by the fallback path and
 // the tests, which assert on their SGR-stripped output) ----
 
-func tokenFooter(prefix string) string {
-	footer := " type a label to copy · space: line mode · ? help · esc to cancel"
-	if prefix != "" {
-		footer = " " + prefix + "_ ·" + footer
+// tokenFooter renders the token/word-mode status line: the target count, the
+// narrowing count while a prefix is typed, and — when only one candidate is
+// still reachable — a preview of exactly what the next key will copy.
+func tokenFooter(prefix string, lm *LabelMap, word bool) string {
+	name := "type a label to copy"
+	toggles := " · space: line mode · tab: word mode · ? help · esc to cancel"
+	if word {
+		name = "word mode: type a label"
+		toggles = " · tab: token mode · ? help · esc to cancel"
 	}
-	return footer
+	if prefix != "" {
+		if text, ok := lm.OnlyMatch(prefix); ok {
+			return " " + prefix + "_ · copy: " + truncate(text, 48) + toggles
+		}
+		return fmt.Sprintf(" %s_ · %d targets%s", prefix, lm.MatchCount(prefix), toggles)
+	}
+	return fmt.Sprintf(" %d targets · %s%s", lm.Count(), name, toggles)
 }
 
 func lineFooter(prefix string, anchor, cursor int) string {
@@ -507,7 +574,7 @@ func Render(w io.Writer, screen string, cands []Candidate, lm *LabelMap, prefix 
 	s := NewScreen(width, height)
 	_, view := viewWindow(len(strings.Split(screen, "\n")), height)
 	PaintTokens(s, Rect{X: 0, Y: 0, W: width, H: view}, screen, cands, lm, prefix)
-	PaintFooter(s, tokenFooter(prefix))
+	PaintFooter(s, tokenFooter(prefix, lm, false))
 	s.Flush(w, sgrTable(cfg))
 }
 

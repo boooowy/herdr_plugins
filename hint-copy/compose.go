@@ -4,10 +4,10 @@ import "strings"
 
 // composite reproduces the whole tab inside the full-tab overlay so that
 // opening hint-copy does not appear to move any pane: every pane's visible
-// content is captured WITH its colors (ANSI read) and painted at its real
-// position, borders use the theme-ish colors (focused pane keeps its focus
-// color), and the hint interaction happens only inside the target pane's
-// content rect.
+// content — captured WITH its colors by captureTab and parsed by
+// parseCapture — is painted at its real position, borders use the theme-ish
+// colors (focused pane keeps its focus color), and the hint interaction
+// happens only inside the target pane's content rect.
 //
 // Geometry (measured against herdr 0.7.4): pane rects tile the tab area
 // exactly in absolute terminal cells; each pane draws a 1-cell border ring
@@ -16,21 +16,21 @@ import "strings"
 // are screen coordinates minus (area + 1); the tab-perimeter borders fall
 // under the overlay's own border.
 type composite struct {
-	base   *Screen             // static: every pane's colored content + borders
-	target Rect                // target pane's content region, overlay coords
-	plain  map[string][]string // pane id → plain lines (target's reused by ui)
-	styled map[string][][]Cell // pane id → styled lines
+	base   *Screen // static: every pane's colored content + borders
+	target Rect    // target pane's content region, overlay coords
 }
 
-// buildComposite captures the tab from the pre-overlay layout snapshot (the
+// buildComposite paints the tab from the pre-overlay layout snapshot (the
 // action recorded it before opening the overlay — reading pane.layout from
 // inside the overlay reports the overlay as a split and halves the launch
-// pane's rect). It returns nil — meaning "fall back to the plain full-screen
-// frame" — when no usable snapshot exists or the overlay's terminal size
-// doesn't match the measured area-minus-border relation (dw/dh of 1-4
-// cells).
-func buildComposite(client *herdrClient, lay *paneLayoutResult, targetID string, w, h int, cfg Config, tbl *styleTable) *composite {
-	if lay == nil || len(lay.Panes) < 2 {
+// pane's rect) and the already-captured pane content. It returns nil —
+// meaning "fall back to the plain full-screen frame" — when no usable
+// snapshot exists or the overlay's terminal size doesn't match the measured
+// area-minus-border relation (dw/dh of 1-4 cells). A single-pane tab
+// composites too: its border ring stays in place, so opening the overlay
+// doesn't read as a screen switch.
+func buildComposite(lay *paneLayoutResult, parsed *tabParsed, targetID string, w, h int, cfg Config, tbl *styleTable) *composite {
+	if lay == nil || len(lay.Panes) < 1 {
 		debugf("composite: nil (no layout snapshot, panes=%d)", layPaneCount(lay))
 		return nil
 	}
@@ -45,24 +45,13 @@ func buildComposite(client *herdrClient, lay *paneLayoutResult, targetID string,
 
 	base := NewScreen(w, h)
 	base.styles = tbl
-	titles := client.paneTitles()
 	borderSt := tbl.id(colorCode(cfg.BorderFg, false))
 	focusSt := tbl.id(colorCode(cfg.BorderFocusFg, false))
 
-	comp := &composite{
-		base:   base,
-		plain:  make(map[string][]string, len(lay.Panes)),
-		styled: make(map[string][][]Cell, len(lay.Panes)),
-	}
+	comp := &composite{base: base}
 	found := false
 	for _, p := range lay.Panes {
-		ansiText, _, rerr := client.paneReadFull(p.PaneID, "visible", 0, true)
-		if rerr != nil {
-			ansiText = ""
-		}
-		cells, plain := parseANSI(ansiText, tbl)
-		comp.plain[p.PaneID] = plain
-		comp.styled[p.PaneID] = cells
+		cells := parsed.styled[p.PaneID]
 
 		content := Rect{
 			X: p.Rect.X + 1 - ox,
@@ -78,7 +67,7 @@ func buildComposite(client *herdrClient, lay *paneLayoutResult, targetID string,
 		}
 		box := Rect{X: p.Rect.X - ox, Y: p.Rect.Y - oy, W: p.Rect.Width, H: p.Rect.Height}
 		paintBorder(base, box, st)
-		if title := titles[p.PaneID]; title != "" {
+		if title := parsed.titles[p.PaneID]; title != "" {
 			paintBorderTitle(base, box, title, st)
 		}
 		paintPaneCells(base, content, cells)

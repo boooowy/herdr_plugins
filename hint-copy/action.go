@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
-	"strings"
+	"time"
 )
 
 // envLayout carries the tab layout captured BEFORE the overlay opens. Once
@@ -21,11 +21,13 @@ const envTargetPane = "HINTCOPY_TARGET_PANE_ID"
 const pluginID = "boooowy.hint-copy"
 
 // runAction is the keybinding entrypoint. It runs server-side (no terminal):
-// resolve the focused pane, make sure there is something to copy, then ask
-// herdr to open the hints overlay anchored over that pane. mode "copy" makes
-// the overlay start directly in copy mode (and skips the emptiness pre-check
-// — the scrollback can hold content even when the visible screen is blank).
+// resolve the focused pane, snapshot the tab layout, and ask herdr to open
+// the hints overlay anchored over that pane. Everything else — including the
+// empty-screen check — happens in the overlay process, so the overlay opens
+// with as few socket round trips as possible. mode "copy" makes the overlay
+// start directly in copy mode.
 func runAction(mode string) {
+	t0 := time.Now()
 	client, err := newHerdrClient()
 	if err != nil {
 		errExit(err)
@@ -35,25 +37,14 @@ func runAction(mode string) {
 		errExit("could not resolve the focused pane")
 	}
 
-	if mode != "copy" {
-		// Pre-check: line mode can copy any non-blank line, so only a truly
-		// empty screen skips the overlay in favor of a toast.
-		text, err := client.paneRead(paneID, "visible")
-		if err != nil {
-			errExit("read pane:", err)
-		}
-		cfg := loadConfig()
-		if len(Extract(text, cfg)) == 0 && strings.TrimSpace(text) == "" {
-			client.notify("Hint Copy", "Nothing to copy on screen", "none")
-			return
-		}
-	}
-
 	env := map[string]string{envTargetPane: paneID}
 	if mode == "copy" {
 		env["HINTCOPY_MODE"] = "copy"
 	}
-	if lay, lerr := client.paneLayout(paneID); lerr == nil && len(lay.Panes) >= 2 {
+	// The snapshot travels even for a single-pane tab: the UI needs the tab
+	// area to recognize the overlay pty's final size, and the composite path
+	// keeps the pane border in place so nothing appears to move.
+	if lay, lerr := client.paneLayout(paneID); lerr == nil && len(lay.Panes) >= 1 {
 		if data, merr := json.Marshal(lay); merr == nil {
 			env[envLayout] = base64.StdEncoding.EncodeToString(data)
 		}
@@ -63,6 +54,7 @@ func runAction(mode string) {
 	if err := client.pluginPaneOpen(pluginID, "hints", "overlay", "", true, env); err != nil {
 		errExit("open overlay:", err)
 	}
+	debugf("action: overlay opened after %s", time.Since(t0))
 }
 
 // resolveTargetPane picks the pane whose screen we hint: HERDR_PANE_ID when

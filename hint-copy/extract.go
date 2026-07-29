@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -53,8 +54,8 @@ var builtinPatterns = []pattern{
 		priority: 100,
 		// Parens/brackets stay in the charset; trimTrailingPunct drops them
 		// only when unbalanced, so wiki URLs like .../Go_(language) survive.
-		re:       regexp.MustCompile("(?:https?|ftp|file)://[^\\s<>\"'`]+"),
-		filter:   trimTrailingPunct,
+		re:     regexp.MustCompile("(?:https?|ftp|file)://[^\\s<>\"'`]+"),
+		filter: trimTrailingPunct,
 	},
 	{
 		name:     "email",
@@ -318,6 +319,60 @@ func resolveOverlaps(ms []Candidate, pats []pattern) []Candidate {
 		lastEnd = m.MatchEnd
 	}
 	return kept
+}
+
+// ExtractWords finds every word-like run on screen for the word mode: runs
+// of letters/digits plus cfg.WordChars, trimmed so they start and end
+// alphanumeric, at least cfg.WordMinLen runes long. It deliberately ignores
+// the token patterns — word mode is the explicit "label everything" escape
+// hatch when no pattern matched what you want — and reuses Candidate so the
+// token-mode painters and label maps work unchanged. Unlike Extract it caps
+// at the label capacity (alphabet²) instead of max_candidates: labeling
+// everything is the whole point, and an unlabeled word just looks broken.
+func ExtractWords(screen string, cfg Config) []Candidate {
+	minLen := cfg.WordMinLen
+	if minLen <= 0 {
+		minLen = 3
+	}
+	isWord := func(r rune) bool {
+		return unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune(cfg.WordChars, r)
+	}
+	isEdge := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+	var out []Candidate
+	for li, line := range strings.Split(screen, "\n") {
+		runes := []rune(line)
+		for i := 0; i < len(runes); {
+			if !isWord(runes[i]) {
+				i++
+				continue
+			}
+			j := i
+			for j < len(runes) && isWord(runes[j]) {
+				j++
+			}
+			s, e := i, j
+			for s < e && !isEdge(runes[s]) {
+				s++
+			}
+			for e > s && !isEdge(runes[e-1]) {
+				e--
+			}
+			if e-s >= minLen {
+				out = append(out, Candidate{
+					Line:       li,
+					StartRune:  s,
+					EndRune:    e,
+					MatchStart: s,
+					MatchEnd:   e,
+					Text:       string(runes[s:e]),
+					Pattern:    "word",
+				})
+			}
+			i = j
+		}
+	}
+	n := len([]rune(cfg.Alphabet))
+	return capUnique(out, n*n)
 }
 
 // capUnique limits candidates to the first max unique strings in order;
