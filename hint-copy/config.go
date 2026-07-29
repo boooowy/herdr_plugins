@@ -11,22 +11,25 @@ import (
 // $HERDR_PLUGIN_CONFIG_DIR/config.toml. Every field has a default; a missing
 // file or a broken field never stops the plugin.
 type Config struct {
-	Alphabet      string          `toml:"alphabet"`
-	Reverse       bool            `toml:"reverse"`
-	OSC52         bool            `toml:"osc52"`
-	MaxCandidates int             `toml:"max_candidates"`
-	HintFg        string          `toml:"hint_fg"`
-	HintBg        string          `toml:"hint_bg"`
-	MatchFg       string          `toml:"match_fg"`
-	SelBg         string          `toml:"sel_bg"`
-	SearchBg      string          `toml:"search_bg"`
-	FlashBg       string          `toml:"flash_bg"` // copy confirmation flash
-	FlashMs       int             `toml:"flash_ms"` // flash duration; 0 disables
-	ScrollbackLines int           `toml:"scrollback_lines"`
-	BorderFg      string          `toml:"border_fg"`       // composite pane borders
-	BorderFocusFg string          `toml:"border_focus_fg"` // target pane's border
-	Patterns      map[string]bool `toml:"patterns"`
-	CustomPatterns []CustomPattern `toml:"custom_patterns"`
+	Alphabet        string          `toml:"alphabet"`
+	Reverse         bool            `toml:"reverse"`
+	OSC52           bool            `toml:"osc52"`
+	MaxCandidates   int             `toml:"max_candidates"`
+	WordMinLen      int             `toml:"word_min_len"` // word mode: shortest labeled word
+	WordChars       string          `toml:"word_chars"`   // word mode: extra in-word characters
+	HintFg          string          `toml:"hint_fg"`
+	HintBg          string          `toml:"hint_bg"`
+	MatchFg         string          `toml:"match_fg"`
+	MatchBg         string          `toml:"match_bg"` // candidate span background; "none" disables
+	SelBg           string          `toml:"sel_bg"`
+	SearchBg        string          `toml:"search_bg"`
+	FlashBg         string          `toml:"flash_bg"` // copy confirmation flash
+	FlashMs         int             `toml:"flash_ms"` // flash duration; 0 disables
+	ScrollbackLines int             `toml:"scrollback_lines"`
+	BorderFg        string          `toml:"border_fg"`       // composite pane borders
+	BorderFocusFg   string          `toml:"border_focus_fg"` // target pane's border
+	Patterns        map[string]bool `toml:"patterns"`
+	CustomPatterns  []CustomPattern `toml:"custom_patterns"`
 
 	// loadErr carries a config parse problem so the UI can surface it once
 	// as a notification instead of dying.
@@ -45,9 +48,12 @@ func defaultConfig() Config {
 	return Config{
 		Alphabet:        "asdfghjklqwertyuiopzxcvb",
 		MaxCandidates:   100,
+		WordMinLen:      3,
+		WordChars:       "_.-",
 		HintFg:          "black",
 		HintBg:          "yellow",
 		MatchFg:         "green",
+		MatchBg:         "#1c3a2e", // subdued dark green: shows the exact copy extent
 		SelBg:           "blue",
 		SearchBg:        "magenta",
 		FlashBg:         "#FF8C00",
@@ -83,6 +89,15 @@ func loadConfig() Config {
 	}
 	if cfg.ScrollbackLines <= 0 {
 		cfg.ScrollbackLines = defaultConfig().ScrollbackLines
+	}
+	if cfg.WordMinLen <= 0 {
+		cfg.WordMinLen = defaultConfig().WordMinLen
+	}
+	if cfg.WordChars == "" {
+		cfg.WordChars = defaultConfig().WordChars
+	}
+	if cfg.MatchBg == "" {
+		cfg.MatchBg = defaultConfig().MatchBg
 	}
 	// flash_ms: 0 disables the flash on purpose; a negative value is a typo so
 	// fall back to the default, and cap the dwell so a bad value cannot freeze

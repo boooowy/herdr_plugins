@@ -47,13 +47,14 @@ func runFrame(args []string) {
 	if lerr != nil {
 		errExit("layout:", lerr)
 	}
-	comp := buildComposite(client, lay, target, w, h, cfg, tbl)
+	parsed := parseCapture(captureTab(client, lay, target), tbl)
+	comp := buildComposite(lay, parsed, target, w, h, cfg, tbl)
 	if comp == nil {
 		fmt.Println("composite: nil (would fall back to full-screen)")
 		return
 	}
 	fmt.Printf("composite: target rect %+v\n", comp.target)
-	text := joinPlain(comp.plain[target])
+	text := joinPlain(parsed.plain[target])
 	cands := Extract(text, cfg)
 	lm := AssignLabels(cands, cfg)
 	frame := comp.base.Clone()
@@ -62,7 +63,7 @@ func runFrame(args []string) {
 		content.H = h - 1 - content.Y
 	}
 	PaintTokenOverlay(frame, content, text, cands, lm, "")
-	PaintFooter(frame, tokenFooter(""))
+	PaintFooter(frame, tokenFooter("", lm, false))
 	frame.Flush(os.Stdout, sgrTable(cfg))
 	fmt.Println()
 }

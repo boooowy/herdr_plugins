@@ -1,5 +1,7 @@
 package main
 
+import "strings"
+
 // GenerateLabels returns n distinct hint labels drawn from alphabet. All
 // labels have the same length (1 char while n fits in the alphabet, otherwise
 // 2 chars for everyone), which makes the set trivially prefix-free — a typed
@@ -89,4 +91,35 @@ func (lm *LabelMap) HasPrefix(prefix string) bool {
 // candidate fell past the cap).
 func (lm *LabelMap) LabelFor(text string) string {
 	return lm.byText[text]
+}
+
+// Count returns the number of labeled copy targets.
+func (lm *LabelMap) Count() int { return len(lm.byLabel) }
+
+// MatchCount returns how many labels start with the typed prefix.
+func (lm *LabelMap) MatchCount(prefix string) int {
+	n := 0
+	for label := range lm.byLabel {
+		if strings.HasPrefix(label, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// OnlyMatch returns the candidate text still reachable from the typed prefix
+// when exactly one label matches — the next key will copy it, so the footer
+// can preview it.
+func (lm *LabelMap) OnlyMatch(prefix string) (string, bool) {
+	var text string
+	n := 0
+	for label, t := range lm.byLabel {
+		if strings.HasPrefix(label, prefix) {
+			if n++; n > 1 {
+				return "", false
+			}
+			text = t
+		}
+	}
+	return text, n == 1
 }

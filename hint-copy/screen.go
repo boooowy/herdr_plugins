@@ -27,10 +27,16 @@ const (
 
 // sgrTable builds the SGR sequence for each style from the user config.
 func sgrTable(cfg Config) map[StyleID]string {
+	// The candidate span carries a background so the exact copy extent reads
+	// as a selection; match_bg = "none" restores the foreground-only look.
+	match := colorCode(cfg.MatchFg, false)
+	if cfg.MatchBg != "" && strings.ToLower(cfg.MatchBg) != "none" {
+		match += ";" + colorCode(cfg.MatchBg, true)
+	}
 	return map[StyleID]string{
 		styleHint:    "\x1b[1;" + colorCode(cfg.HintFg, false) + ";" + colorCode(cfg.HintBg, true) + "m",
 		styleDim:     "\x1b[2m",
-		styleMatch:   "\x1b[" + colorCode(cfg.MatchFg, false) + "m",
+		styleMatch:   "\x1b[" + match + "m",
 		styleInverse: "\x1b[7m",
 		styleBorder:  "\x1b[2m",
 		styleSel:     "\x1b[" + colorCode(cfg.SelBg, true) + "m",

@@ -14,6 +14,7 @@ const (
 	KeyEsc
 	KeyEnter
 	KeyBackspace
+	KeyTab
 	KeyCtrl // R holds the letter, e.g. {KeyCtrl, 'f'}
 	KeyUp
 	KeyDown
@@ -104,6 +105,8 @@ func (k *keyReader) Read() (Key, error) {
 		return Key{Kind: KeyEsc}, nil
 	case b == 0x0d || b == 0x0a:
 		return Key{Kind: KeyEnter}, nil
+	case b == 0x09:
+		return Key{Kind: KeyTab}, nil
 	case b == 0x7f || b == 0x08:
 		return Key{Kind: KeyBackspace}, nil
 	case b < 0x20:

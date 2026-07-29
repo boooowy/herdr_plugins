@@ -20,19 +20,21 @@ func flashAndDwell(out *bufio.Writer, sgr map[StyleID]string, ms int, frame *Scr
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
 
-// flashFrameToken builds the token-mode flash frame: the real pane content
-// with every visible occurrence of the copied string lit in styleFlash. The
-// span walk mirrors PaintTokenOverlay so wide/CJK runes light the right cells.
-func flashFrameToken(v *uiView, picked string) *Screen {
+// flashFrameToken builds the token/word-mode flash frame: the real pane
+// content with every visible occurrence of the copied string lit in
+// styleFlash. text and cands come from the mode that copied (word mode has
+// its own candidate set). The span walk mirrors PaintTokenOverlay so
+// wide/CJK runes light the right cells.
+func flashFrameToken(v *uiView, text string, cands []Candidate, picked string) *Screen {
 	f := v.base.Clone()
 	r := v.paintRect // match the rect the base content was painted at
-	lines := strings.Split(v.text, "\n")
+	lines := strings.Split(text, "\n")
 	offset := 0
 	if len(lines) > r.H {
 		offset = len(lines) - r.H
 	}
 	maxX := r.X + r.W
-	for _, c := range v.cands {
+	for _, c := range cands {
 		if c.Text != picked {
 			continue
 		}
@@ -63,21 +65,21 @@ func flashFrameToken(v *uiView, picked string) *Screen {
 // flashFrameLine builds the line-mode flash frame: the styled content drawn as
 // usual, then the copied line range repainted in styleFlash across the content
 // width (the same [margin, maxX) span the selection highlight covers).
-func flashFrameLine(v *uiView, anchor, cursor int) *Screen {
+func flashFrameLine(v *uiView, styled [][]Cell, anchor, cursor int) *Screen {
 	f := v.base.Clone()
 	clearRect(f, v.content)
-	PaintLineModeStyled(f, v.content, v.targetStyled, v.ll, "", anchor, cursor)
+	PaintLineModeStyled(f, v.content, styled, v.ll, "", anchor, cursor)
 	lo, hi := selRange(anchor, cursor)
 	offset := 0
-	if len(v.targetStyled) > v.content.H {
-		offset = len(v.targetStyled) - v.content.H
+	if len(styled) > v.content.H {
+		offset = len(styled) - v.content.H
 	}
 	margin := 0
 	if v.ll.Width() > 0 {
 		margin = v.ll.Width() + 1
 	}
 	maxX := v.content.X + v.content.W
-	for li := 0; li < v.content.H && offset+li < len(v.targetStyled); li++ {
+	for li := 0; li < v.content.H && offset+li < len(styled); li++ {
 		abs := offset + li
 		if abs < lo || abs > hi {
 			continue
