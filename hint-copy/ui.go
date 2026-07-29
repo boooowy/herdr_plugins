@@ -241,11 +241,20 @@ func uiLoop(client *herdrClient, target string, lay *paneLayoutResult, cfg Confi
 		return nil
 	}
 
-	// A screen with no token candidates but visible text starts straight in
-	// line mode — that is the only thing left to copy.
-	mode := modeToken
-	if len(d.cands) == 0 {
-		mode = modeLine
+	// Startup mode: word mode by default (default_mode = "token" restores
+	// the pattern-first behavior). Whichever comes first falls through to
+	// the next mode with candidates; a screen with visible text but nothing
+	// to label starts in line mode — the only thing left to copy.
+	mode := modeLine
+	if cfg.DefaultMode == "word" {
+		d.ensureWords(cfg)
+		if len(d.wordCands) > 0 {
+			mode = modeWord
+		} else if len(d.cands) > 0 {
+			mode = modeToken
+		}
+	} else if len(d.cands) > 0 {
+		mode = modeToken
 	}
 	prefix := ""
 	anchor := -1

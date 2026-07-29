@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -14,6 +15,7 @@ type Config struct {
 	Alphabet        string          `toml:"alphabet"`
 	Reverse         bool            `toml:"reverse"`
 	OSC52           bool            `toml:"osc52"`
+	DefaultMode     string          `toml:"default_mode"` // startup mode: "word" or "token"
 	MaxCandidates   int             `toml:"max_candidates"`
 	WordMinLen      int             `toml:"word_min_len"` // word mode: shortest labeled word
 	WordChars       string          `toml:"word_chars"`   // word mode: extra in-word characters
@@ -47,6 +49,7 @@ type CustomPattern struct {
 func defaultConfig() Config {
 	return Config{
 		Alphabet:        "asdfghjklqwertyuiopzxcvb",
+		DefaultMode:     "word",
 		MaxCandidates:   100,
 		WordMinLen:      3,
 		WordChars:       "_.-",
@@ -98,6 +101,12 @@ func loadConfig() Config {
 	}
 	if cfg.MatchBg == "" {
 		cfg.MatchBg = defaultConfig().MatchBg
+	}
+	// default_mode: anything that is not explicitly "token" means word mode.
+	if strings.EqualFold(cfg.DefaultMode, "token") {
+		cfg.DefaultMode = "token"
+	} else {
+		cfg.DefaultMode = "word"
 	}
 	// flash_ms: 0 disables the flash on purpose; a negative value is a typo so
 	// fall back to the default, and cap the dwell so a bad value cannot freeze

@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -358,6 +360,35 @@ func TestPlaceLabelRevealOffLeft(t *testing.T) {
 	}
 	if got := s.at(2, 0).R; got != 's' {
 		t.Errorf("remaining label cell = %q, want 's'", got)
+	}
+}
+
+// ---- default mode: word unless the config explicitly says "token" ----
+
+func TestDefaultModeIsWord(t *testing.T) {
+	if got := defaultConfig().DefaultMode; got != "word" {
+		t.Errorf("default DefaultMode = %q, want word", got)
+	}
+}
+
+func TestDefaultModeNormalization(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", dir)
+	write := func(body string) Config {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return loadConfig()
+	}
+	if cfg := write(`default_mode = "Token"`); cfg.DefaultMode != "token" {
+		t.Errorf("Token → %q, want token (case-insensitive)", cfg.DefaultMode)
+	}
+	if cfg := write(`default_mode = "banana"`); cfg.DefaultMode != "word" {
+		t.Errorf("invalid value → %q, want word", cfg.DefaultMode)
+	}
+	if cfg := write(`alphabet = "asdf"`); cfg.DefaultMode != "word" {
+		t.Errorf("unset → %q, want word", cfg.DefaultMode)
 	}
 }
 
