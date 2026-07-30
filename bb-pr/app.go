@@ -126,7 +126,37 @@ func runUI() {
 		errExit(err)
 	}
 
-	w, h := waitForSteadySize()
+	email, token, credsOK := cfg.credentials()
+
+	// Kick the fetches off at a provisional terminal size BEFORE waiting for
+	// the pane pty to settle: the ~1s network round trip overlaps the (up to
+	// 600ms) size wait instead of queueing behind it.
+	w, h := termSize()
+	a := &app{
+		ctx:           ctx,
+		cfg:           cfg,
+		herdr:         herdr,
+		sgr:           sgrTable(cfg),
+		w:             w,
+		h:             h,
+		resultCh:      make(chan func(*app), 8),
+		detail:        map[int]*prDetail{},
+		difftoolPanes: map[int]paneRef{},
+	}
+	if cfg.loadErr != "" {
+		a.status = cfg.loadErr
+	}
+	if credsOK {
+		a.client = newBBClient(email, token, time.Duration(cfg.HTTPTimeoutSec)*time.Second)
+		a.push(newListView(a))
+		if ctx.PRID > 0 {
+			// Ctrl-clicked PR URL: go straight to the PR, list stays underneath.
+			a.push(newDetailView(a, ctx.PRID))
+		}
+	}
+
+	w, h = waitForSteadySize()
+	a.w, a.h = w, h
 	debugf("ui: start %s/%s pr=%d term=%dx%d", ctx.Workspace, ctx.Repo, ctx.PRID, w, h)
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -142,33 +172,17 @@ func runUI() {
 		out.Flush()
 	}()
 
-	email, token, credsOK := cfg.credentials()
 	if !credsOK {
 		showAuthHelp(out, cfg, w, h)
 		return
 	}
 
-	a := &app{
-		ctx:           ctx,
-		cfg:           cfg,
-		client:        newBBClient(email, token, time.Duration(cfg.HTTPTimeoutSec)*time.Second),
-		herdr:         herdr,
-		sgr:           sgrTable(cfg),
-		w:             w,
-		h:             h,
-		resultCh:      make(chan func(*app), 8),
-		detail:        map[int]*prDetail{},
-		difftoolPanes: map[int]paneRef{},
-	}
-	if cfg.loadErr != "" {
-		a.status = cfg.loadErr
-	}
-
-	lv := newListView(a)
-	a.push(lv)
-	if ctx.PRID > 0 {
-		// Ctrl-clicked PR URL: go straight to the PR, list stays underneath.
-		a.push(newDetailView(a, ctx.PRID))
+	// Row widths were baked at the provisional size — regenerate at the
+	// settled one (same as the SIGWINCH path).
+	for _, v := range a.stack {
+		if r, ok := v.(interface{ rebuild(*app) }); ok {
+			r.rebuild(a)
+		}
 	}
 
 	keyCh := make(chan Key)

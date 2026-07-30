@@ -33,6 +33,13 @@ func (v *listView) load(a *app, force bool) {
 	a.prsMoreLoading = false
 	a.prsGen++
 	gen := a.prsGen
+	if !force {
+		// Paint the previous fetch instantly while the fresh page loads
+		// (prsNext stays "" so loadMore waits for real data).
+		if cached := loadPRCache(a.ctx.Workspace, a.ctx.Repo, state); len(cached) > 0 {
+			a.prs = cached
+		}
+	}
 	first := a.client.listPRsFirstURL(a.ctx.Workspace, a.ctx.Repo, state)
 	// fetch bumps a.loading before the rebuild below runs, so the empty
 	// placeholder reads 読み込み中 instead of claiming there are no PRs.
@@ -57,6 +64,7 @@ func (v *listView) load(a *app, force bool) {
 			a.prsErr = ""
 			a.prs = prs
 			a.prsNext = next
+			savePRCache(a.ctx.Workspace, a.ctx.Repo, state, prs)
 			v.rebuild(a)
 		}, nil
 	})
