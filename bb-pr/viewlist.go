@@ -176,9 +176,10 @@ func (v *listView) handle(a *app, k Key) {
 		if r := v.vp.Current(); r != nil && r.Kind == RowPR {
 			a.push(newDetailView(a, a.prs[r.Item.(int)].ID))
 		}
-	case isKey(k, 's') || k.Kind == KeyTab || (k.Kind == KeyRune && k.R == '\t'):
+	case isKey(k, 's') || isKey(k, 'l') || k.Kind == KeyTab || k.Kind == KeyRight ||
+		(k.Kind == KeyRune && k.R == '\t'):
 		v.cycleState(a, 1)
-	case k.Kind == KeyShiftTab:
+	case isKey(k, 'h') || k.Kind == KeyShiftTab || k.Kind == KeyLeft:
 		v.cycleState(a, -1)
 	case isKey(k, 'r') || isKey(k, 'R'):
 		v.load(a, true)

@@ -18,7 +18,7 @@ var helpByCtx = map[string]struct {
 	"list": {"PR一覧", []helpLine{
 		{"j / k / ↑ / ↓", "移動"},
 		{"Enter", "PR詳細を開く"},
-		{"s / Tab / Shift-Tab", "state フィルタ切替 (OPEN/MERGED/…)"},
+		{"s / Tab / l / h  (→/←)", "state フィルタ切替 (OPEN/MERGED/…)"},
 		{"y", "PR URL をコピー"},
 		{"b", "source branch 名をコピー"},
 	}},
