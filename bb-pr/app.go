@@ -47,6 +47,7 @@ type app struct {
 	prs            []PullRequest // list cache for prsState (grows page by page)
 	prsState       string
 	prsNext        string // next PR-list page URL; "" = fully loaded
+	prsErr         string // last list-fetch error; shown in the empty placeholder
 	prsGen         int    // list generation; bumped on reload/state switch to drop stale pages
 	prsMoreLoading bool   // a loadMore page is in flight
 	detail         map[int]*prDetail

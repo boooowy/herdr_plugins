@@ -29,7 +29,7 @@ func (v *listView) load(a *app, force bool) {
 		v.rebuild(a)
 		return
 	}
-	a.prs, a.prsNext = nil, ""
+	a.prs, a.prsNext, a.prsErr = nil, "", ""
 	a.prsMoreLoading = false
 	a.prsGen++
 	gen := a.prsGen
@@ -38,16 +38,23 @@ func (v *listView) load(a *app, force bool) {
 	// placeholder reads 読み込み中 instead of claiming there are no PRs.
 	a.fetch("prs "+state, func() (func(*app), error) {
 		prs, next, err := a.client.listPRsPage(first)
-		if err != nil {
-			return nil, err
-		}
 		return func(a *app) {
 			if a.prsGen != gen {
 				return // superseded by a reload or state switch
 			}
+			if err != nil {
+				// Surface the failure in the list body too: the footer
+				// status vanishes on the next keypress, and a permanent
+				// 読み込み中 placeholder would read as "cannot switch".
+				a.prsErr = err.Error()
+				a.status = a.prsErr
+				v.rebuild(a)
+				return
+			}
 			if prs == nil {
 				prs = []PullRequest{} // non-nil marks "loaded, empty"
 			}
+			a.prsErr = ""
 			a.prs = prs
 			a.prsNext = next
 			v.rebuild(a)
@@ -113,9 +120,12 @@ func (v *listView) rebuild(a *app) {
 		))
 	}
 	if len(a.prs) == 0 {
-		if a.loading > 0 {
+		switch {
+		case a.loading > 0:
 			rows = append(rows, textRow(Span{" 読み込み中…", styleDim}))
-		} else {
+		case a.prsErr != "":
+			rows = append(rows, textRow(Span{" 取得に失敗しました（r で再読込）: " + a.prsErr, styleDim}))
+		default:
 			rows = append(rows, textRow(Span{" (" + a.prsState + " のPRはありません)", styleDim}))
 		}
 	}
@@ -166,15 +176,10 @@ func (v *listView) handle(a *app, k Key) {
 		if r := v.vp.Current(); r != nil && r.Kind == RowPR {
 			a.push(newDetailView(a, a.prs[r.Item.(int)].ID))
 		}
-	case isKey(k, 's'):
-		for i, st := range prStates {
-			if st == a.prsState {
-				a.prsState = prStates[(i+1)%len(prStates)]
-				break
-			}
-		}
-		a.prs = nil
-		v.load(a, false)
+	case isKey(k, 's') || k.Kind == KeyTab || (k.Kind == KeyRune && k.R == '\t'):
+		v.cycleState(a, 1)
+	case k.Kind == KeyShiftTab:
+		v.cycleState(a, -1)
 	case isKey(k, 'r') || isKey(k, 'R'):
 		v.load(a, true)
 	case isKey(k, 'o'):
@@ -190,8 +195,20 @@ func (v *listView) handle(a *app, k Key) {
 	}
 }
 
+// cycleState moves the state filter forward/backward and reloads the list.
+func (v *listView) cycleState(a *app, dir int) {
+	for i, st := range prStates {
+		if st == a.prsState {
+			a.prsState = prStates[(i+dir+len(prStates))%len(prStates)]
+			break
+		}
+	}
+	a.prs = nil
+	v.load(a, false)
+}
+
 func (v *listView) footer(a *app) string {
-	return "j/k:移動  Enter:開く  s:state切替  r:再読込  o:ブラウザ  q:終了"
+	return "j/k:移動  Enter:開く  Tab/s:state切替  r:再読込  o:ブラウザ  q:終了"
 }
 
 // isKey reports whether k is the plain rune r.

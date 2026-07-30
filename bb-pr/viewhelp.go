@@ -14,7 +14,7 @@ var helpLines = []struct {
 	{"v", "内蔵diffビューア (Filesタブ・コメント表示付き)"},
 	{"Tab / Shift-Tab / 1-3", "詳細タブ切替"},
 	{"e", "説明文の全文表示 (Overview)"},
-	{"s", "state フィルタ切替 (一覧)"},
+	{"s / Tab / Shift-Tab", "state フィルタ切替 (一覧)"},
 	{"]h / [h", "次 / 前の hunk (diff)"},
 	{"]f / [f  (→/←)", "次 / 前のファイル (diff)"},
 	{"za / zA", "hunk 折畳 / 全折畳 (diff)"},
