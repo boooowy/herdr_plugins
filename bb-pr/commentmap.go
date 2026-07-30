@@ -120,7 +120,10 @@ func (t *CommentThread) anchor() (newLine, oldLine int) {
 // "L496", or "旧L12" for old-side anchors. "" for non-inline threads. Ranges
 // come only from the API's start_to/start_from — never guessed.
 func (t *CommentThread) lineLabel() string {
-	in := t.Root.Inline
+	return anchorLabel(t.Root.Inline)
+}
+
+func anchorLabel(in *InlineAnchor) string {
 	if in == nil {
 		return ""
 	}

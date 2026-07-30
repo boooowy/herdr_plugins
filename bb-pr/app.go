@@ -228,6 +228,9 @@ func runUI() {
 			case k.Kind == KeyCtrl && k.R == 'c':
 				return
 			case k.Kind == KeyRune && k.R == 'q', k.Kind == KeyEsc:
+				if v, ok := a.top().(escInterceptor); ok && v.interceptEsc(a) {
+					break // the view consumed it (e.g. cancelled a selection)
+				}
 				a.pop()
 			default:
 				a.top().handle(a, k)

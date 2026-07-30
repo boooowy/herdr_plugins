@@ -9,6 +9,18 @@ import (
 // hunkRef identifies the hunk a diff row belongs to (viewport Item).
 type hunkRef struct{ hunk int }
 
+// escInterceptor lets a view consume q/Esc instead of the app popping it —
+// the diff view uses it to cancel an active line selection.
+type escInterceptor interface{ interceptEsc(a *app) bool }
+
+func (v *diffView) interceptEsc(*app) bool {
+	if v.selAnchor < 0 {
+		return false
+	}
+	v.selAnchor = -1
+	return true
+}
+
 // diffView shows one file's diff hunk by hunk, with inline comment threads
 // boxed under their anchor lines and orphaned (outdated/unmatched) threads
 // collected at the end.
@@ -21,6 +33,16 @@ type diffView struct {
 	wrap    bool // long diff lines: wrapped vs clipped (w key)
 	pending rune // first key of a two-key sequence (]h, [h, ]f, [f, za, zA)
 
+	// selAnchor is the row where v/V started a line selection (-1 = none);
+	// the selection runs from there to the cursor. Row indices go stale on
+	// rebuild, so any rebuild clears it.
+	selAnchor int
+
+	// threadFor/threadSpan mirror detailView's: reply-target lookup and the
+	// focused-thread highlight range per comment root ID.
+	threadFor  map[int]CommentThread
+	threadSpan map[int][2]int
+
 	// pendingJump is a comment root ID to scroll to once its row exists
 	// (set when the Comments tab jumps into the diff); 0 = none.
 	pendingJump int
@@ -28,10 +50,11 @@ type diffView struct {
 
 func newDiffView(a *app, prID, fileIdx int) *diffView {
 	v := &diffView{
-		prID:    prID,
-		fileIdx: fileIdx,
-		folded:  map[int]bool{},
-		showCmt: a.cfg.ShowComments,
+		prID:      prID,
+		fileIdx:   fileIdx,
+		folded:    map[int]bool{},
+		showCmt:   a.cfg.ShowComments,
+		selAnchor: -1,
 	}
 	if a.cfg.ContextFold {
 		v.foldAll(a, true)
@@ -119,6 +142,15 @@ func (v *diffView) rebuild(a *app) {
 	d, st, f := v.fileDiff(a)
 	var rows []Row
 	now := time.Now()
+	v.selAnchor = -1 // row indices go stale
+	v.threadFor = map[int]CommentThread{}
+	v.threadSpan = map[int][2]int{}
+	addThread := func(t CommentThread) {
+		v.threadFor[t.Root.ID] = t
+		start := len(rows)
+		rows = append(rows, threadRows(t, a.w, now, "", nil)...)
+		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
+	}
 
 	if st == nil {
 		rows = append(rows, textRow(Span{" (ファイルがありません)", styleDim}))
@@ -171,7 +203,7 @@ func (v *diffView) rebuild(a *app) {
 			rows = append(rows, diffLineRows(l, numW, a.w, v.wrap)...)
 			if v.showCmt {
 				for _, t := range anchored[[2]int{hi, li}] {
-					rows = append(rows, threadRows(t, a.w, now, "", nil)...)
+					addThread(t)
 				}
 			}
 		}
@@ -182,7 +214,7 @@ func (v *diffView) rebuild(a *app) {
 			Span{"── Orphaned comments (outdated / 現在の diff に対応なし) ", styleOutdated},
 			Span{strings.Repeat("─", max(0, a.w-52)), styleDim}))
 		for _, t := range orphans {
-			rows = append(rows, threadRows(t, a.w, now, "", nil)...)
+			addThread(t)
 		}
 	}
 
@@ -284,7 +316,50 @@ func (v *diffView) render(a *app, s *Screen) {
 	right := fmt.Sprintf("%s  [%d/%d files]  #%d", stats, v.fileIdx+1, len(d.diffstat), v.prID)
 	s.WriteString(a.w-1-displayWidth(right), 0, right, styleDim, a.w)
 	paintSeparator(s, 1, a.w)
-	v.vp.Paint(s, Rect{X: 0, Y: 2, W: a.w, H: a.h - 3})
+	rect := Rect{X: 0, Y: 2, W: a.w, H: a.h - 3}
+	v.vp.Paint(s, rect)
+	if lo, hi, ok := v.selection(); ok {
+		// Active line selection (v/V): tint the selected rows.
+		focusViewportRows(s, &v.vp, rect, lo, hi+1)
+	} else if r := v.vp.Current(); r != nil && r.Kind == RowComment {
+		// Cursor on a thread: light it up like the Comments tab does.
+		if id, ok := r.Item.(int); ok {
+			if span, ok := v.threadSpan[id]; ok {
+				focusViewportRows(s, &v.vp, rect, span[0], span[1])
+			}
+		}
+	}
+}
+
+// selection returns the active v/V row range [lo, hi] (inclusive).
+func (v *diffView) selection() (lo, hi int, ok bool) {
+	if v.selAnchor < 0 || v.vp.Cursor < 0 {
+		return 0, 0, false
+	}
+	lo, hi = v.selAnchor, v.vp.Cursor
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return lo, hi, true
+}
+
+// selectedLines collects the diff lines inside the active selection.
+func (v *diffView) selectedLines() []DiffLine {
+	lo, hi, ok := v.selection()
+	if !ok {
+		return nil
+	}
+	var lines []DiffLine
+	for i := lo; i <= hi && i < len(v.vp.Rows); i++ {
+		r := v.vp.Rows[i]
+		if r.Kind != RowDiffLine || !r.Selectable {
+			continue // skip wrap continuations and stray rows
+		}
+		if l, ok := r.Item.(DiffLine); ok {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 // currentHunk returns the hunk index the cursor is in (-1 when none).
@@ -368,6 +443,18 @@ func (v *diffView) handle(a *app, k Key) {
 	case isKey(k, 'w'):
 		v.wrap = !v.wrap
 		v.rebuild(a)
+	case isKey(k, 'v') || isKey(k, 'V'):
+		// Start / cancel a line selection (extend with j/k, then C).
+		switch {
+		case v.selAnchor >= 0:
+			v.selAnchor = -1
+		default:
+			if r := v.vp.Current(); r != nil && r.Kind == RowDiffLine {
+				v.selAnchor = v.vp.Cursor
+			} else {
+				a.status = "diff 行の上で v を押してください"
+			}
+		}
 	case isKey(k, 'C'):
 		v.composeComment(a)
 	case isKey(k, 'o'):
@@ -387,9 +474,25 @@ func (v *diffView) handle(a *app, k Key) {
 	}
 }
 
-// composeComment opens the comment editor for the cursor row: an inline
-// comment on a diff line, or a reply on a comment thread.
+// composeComment opens the comment editor for the current context: the v/V
+// line selection (range comment), an inline comment on the cursor's diff
+// line, or a reply on a comment thread.
 func (v *diffView) composeComment(a *app) {
+	if lines := v.selectedLines(); lines != nil {
+		_, st, _ := v.fileDiff(a)
+		if st == nil {
+			return
+		}
+		in := rangeAnchor(st.Path(), lines)
+		if in == nil {
+			a.status = "この範囲にはコメントできません"
+			return
+		}
+		v.selAnchor = -1
+		openCommentEditor(a, v.prID, in, 0, st.Path()+" "+anchorLabel(in)+" へのコメント")
+		return
+	}
+
 	r := v.vp.Current()
 	if r == nil {
 		return
@@ -397,7 +500,11 @@ func (v *diffView) composeComment(a *app) {
 	switch r.Kind {
 	case RowComment:
 		if id, ok := r.Item.(int); ok {
-			openCommentEditor(a, v.prID, nil, id)
+			target := ""
+			if t, ok := v.threadFor[id]; ok {
+				target = replyTarget(t)
+			}
+			openCommentEditor(a, v.prID, nil, id, target)
 		}
 	case RowDiffLine:
 		l, ok := r.Item.(DiffLine)
@@ -408,22 +515,48 @@ func (v *diffView) composeComment(a *app) {
 		if st == nil {
 			return
 		}
-		in := &InlineAnchor{Path: st.Path()}
-		switch {
-		case l.Kind != LineDel && l.NewNo > 0:
-			n := l.NewNo
-			in.To = &n
-		case l.OldNo > 0:
-			n := l.OldNo
-			in.From = &n
-		default:
+		in := rangeAnchor(st.Path(), []DiffLine{l})
+		if in == nil {
 			a.status = "この行にはコメントできません"
 			return
 		}
-		openCommentEditor(a, v.prID, in, 0)
+		openCommentEditor(a, v.prID, in, 0, st.Path()+" "+anchorLabel(in)+" へのコメント")
 	default:
 		a.status = "diff 行かコメントの上で C を押してください"
 	}
+}
+
+// rangeAnchor maps selected diff lines onto a Bitbucket inline anchor. New
+// side wins: to = the last new-side line, start_to = the first (when they
+// differ); a deletions-only selection anchors on the old side. nil when no
+// line is commentable.
+func rangeAnchor(path string, lines []DiffLine) *InlineAnchor {
+	var newNos, oldNos []int
+	for _, l := range lines {
+		if l.Kind != LineDel && l.NewNo > 0 {
+			newNos = append(newNos, l.NewNo)
+		} else if l.OldNo > 0 {
+			oldNos = append(oldNos, l.OldNo)
+		}
+	}
+	in := &InlineAnchor{Path: path}
+	switch {
+	case len(newNos) > 0:
+		end := newNos[len(newNos)-1]
+		in.To = &end
+		if start := newNos[0]; start != end {
+			in.StartTo = &start
+		}
+	case len(oldNos) > 0:
+		end := oldNos[len(oldNos)-1]
+		in.From = &end
+		if start := oldNos[0]; start != end {
+			in.StartFrom = &start
+		}
+	default:
+		return nil
+	}
+	return in
 }
 
 // toggleFold flips the fold state of the hunk under the cursor.
@@ -485,5 +618,23 @@ func (v *diffView) snapToHunk(hi int) {
 }
 
 func (v *diffView) footer(a *app) string {
-	return "j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za:折畳  w:折返し  c:💬  C:コメント  D:diffツール  q:戻る"
+	if lines := v.selectedLines(); lines != nil {
+		label := "選択中"
+		_, st, _ := v.fileDiff(a)
+		if st != nil {
+			if in := rangeAnchor(st.Path(), lines); in != nil {
+				label = "選択中 " + anchorLabel(in)
+			}
+		}
+		return label + "  j/k:範囲変更  C:コメント  v/Esc:解除"
+	}
+	cKey := "C:コメント"
+	if r := v.vp.Current(); r != nil && r.Kind == RowComment {
+		if id, ok := r.Item.(int); ok {
+			if t, ok := v.threadFor[id]; ok {
+				cKey = "C:" + replyTarget(t)
+			}
+		}
+	}
+	return "j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za:折畳  w:折返し  v:選択  c:💬  " + cKey + "  D:diffツール  q:戻る"
 }

@@ -43,7 +43,42 @@ const (
 // their own (later, thus winning) background.
 const styleOnCommentBg StyleID = 200
 
-func onCmtBg(s StyleID) StyleID { return s + styleOnCommentBg }
+// styleOnFocusBg is the offset Screen.FocusRow adds to highlight the focused
+// comment thread / the visual line selection: base styles (0-199) land at
+// 400-599, comment-bg styles (200-399) at 600-799 — both render on focus_bg
+// (which replaces the comment bg; a style's own bg still wins).
+const styleOnFocusBg StyleID = 400
+
+func onCmtBg(s StyleID) StyleID   { return s + styleOnCommentBg }
+func onFocusBg(s StyleID) StyleID { return s + styleOnFocusBg }
+
+// focusRow shifts every cell of a painted row onto the focus background —
+// the focused-thread / line-selection highlight. (Lives here rather than on
+// Screen: screen.go is a hint-copy snapshot.)
+func focusRow(s *Screen, y, x, maxX int) {
+	if y < 0 || y >= s.H {
+		return
+	}
+	if maxX > s.W {
+		maxX = s.W
+	}
+	for ; x < maxX; x++ {
+		if c := s.at(x, y); c.Style < styleOnFocusBg {
+			c.Style += styleOnFocusBg
+		}
+	}
+}
+
+// focusViewportRows applies focusRow to the viewport rows [start, end) that
+// are currently visible inside rect.
+func focusViewportRows(s *Screen, vp *Viewport, rect Rect, start, end int) {
+	for i := start; i < end; i++ {
+		if i < vp.Top || i >= vp.Top+rect.H {
+			continue
+		}
+		focusRow(s, rect.Y+i-vp.Top, rect.X, rect.X+rect.W)
+	}
+}
 
 // sgrTable builds the SGR sequence for each style from the user config,
 // plus a comment-background variant of every style (see styleOnCommentBg).
@@ -76,13 +111,19 @@ func sgrTable(cfg Config) map[StyleID]string {
 		styleSynNumber:   codeBg + "\x1b[38;5;215m",
 		styleSynFunc:     codeBg + "\x1b[34m",
 	}
-	// Comment-area variants: the area bg comes first so a style's own bg
-	// (code blocks) still wins where present.
+	// Comment-area and focus variants: the area bg comes first so a style's
+	// own bg (code blocks) still wins where present. Focus replaces the
+	// comment bg (600s) and also tints plain rows (400s, diff-line selection).
 	cmtBg := "\x1b[" + colorCode(cfg.CommentBg, true) + "m"
+	focusBg := "\x1b[" + colorCode(cfg.FocusBg, true) + "m"
 	m[onCmtBg(styleNone)] = cmtBg
+	m[onFocusBg(styleNone)] = focusBg
+	m[onFocusBg(onCmtBg(styleNone))] = focusBg
 	for id, seq := range m {
 		if id < styleOnCommentBg {
 			m[onCmtBg(id)] = cmtBg + seq
+			m[onFocusBg(id)] = focusBg + seq
+			m[onFocusBg(onCmtBg(id))] = focusBg + seq
 		}
 	}
 	return m

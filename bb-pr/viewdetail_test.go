@@ -44,6 +44,20 @@ func TestCommentExcerptRows(t *testing.T) {
 	}
 }
 
+func TestReplyTarget(t *testing.T) {
+	to := 15
+	inline := CommentThread{Root: mkComment(1, 0, "a.go", nil, &to, false, time.Now())}
+	inline.Root.User.DisplayName = "tanaka"
+	if got := replyTarget(inline); got != "返信→tanaka L15" {
+		t.Errorf("inline target = %q", got)
+	}
+	general := CommentThread{Root: mkComment(2, 0, "", nil, nil, false, time.Now())}
+	general.Root.User.DisplayName = "sato"
+	if got := replyTarget(general); got != "返信→sato" {
+		t.Errorf("general target = %q", got)
+	}
+}
+
 func TestCommentExcerptRowsFallsBack(t *testing.T) {
 	// Diff not loaded yet.
 	thread := CommentThread{Root: mkComment(1, 0, "a.go", nil, iptr(10), false, time.Now())}

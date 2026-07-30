@@ -191,6 +191,31 @@ func TestPostComment(t *testing.T) {
 	}
 }
 
+func TestPostCommentMultiLineRange(t *testing.T) {
+	var got map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/37/comments", func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&got)
+		fmt.Fprint(w, `{"id":1}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	start, end := 13, 15
+	_, err := testClient(srv).postComment("ws", "repo", 37, "range",
+		&InlineAnchor{Path: "a.py", StartTo: &start, To: &end}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := got["inline"].(map[string]any)
+	if in["start_to"] != float64(13) || in["to"] != float64(15) {
+		t.Errorf("inline = %v", in)
+	}
+	if _, ok := in["start_from"]; ok {
+		t.Error("start_from must be omitted for new-side ranges")
+	}
+}
+
 func TestPostCommentGeneralOmitsAnchor(t *testing.T) {
 	var got map[string]any
 	mux := http.NewServeMux()

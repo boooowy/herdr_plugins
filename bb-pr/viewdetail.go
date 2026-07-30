@@ -25,6 +25,10 @@ type detailView struct {
 	// inlineThreadFor maps a comment root ID to its inline thread — how the
 	// Comments tab's Enter finds the file/line to jump to in the diff view.
 	inlineThreadFor map[int]CommentThread
+	// threadFor covers every thread (general + inline) for the reply-target
+	// footer; threadSpan is each thread's row range for the focus highlight.
+	threadFor  map[int]CommentThread
+	threadSpan map[int][2]int
 }
 
 func newDetailView(a *app, id int) *detailView {
@@ -209,6 +213,8 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	general := generalThreads(d.comments)
 	byFile := inlineThreadsByFile(d.comments)
 	v.inlineThreadFor = map[int]CommentThread{}
+	v.threadFor = map[int]CommentThread{}
+	v.threadSpan = map[int][2]int{}
 
 	inlineTotal := 0
 	for _, ts := range byFile {
@@ -229,10 +235,19 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 		rows = append(rows, textRow(Span{line, styleDim}), textRow())
 	}
 
+	// addThread appends a thread's rows and records its span (sans the
+	// trailing gap row) for the focus highlight.
+	addThread := func(t CommentThread, label string, excerpt []Row) {
+		v.threadFor[t.Root.ID] = t
+		start := len(rows)
+		rows = append(rows, threadRows(t, a.w, now, label, excerpt)...)
+		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
+	}
+
 	if len(general) > 0 {
 		section(fmt.Sprintf("PR コメント (%d)", len(general)))
 		for _, t := range general {
-			rows = append(rows, threadRows(t, a.w, now, "", nil)...)
+			addThread(t, "", nil)
 		}
 	}
 	if inlineTotal > 0 {
@@ -241,12 +256,28 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 			rows = append(rows, textRow(Span{" 📄 ", styleNone}, Span{path, styleTitle}), textRow())
 			for _, t := range byFile[path] {
 				v.inlineThreadFor[t.Root.ID] = t
-				excerpt := commentExcerptRows(t, d.files, a.w)
-				rows = append(rows, threadRows(t, a.w, now, t.lineLabel(), excerpt)...)
+				addThread(t, t.lineLabel(), commentExcerptRows(t, d.files, a.w))
 			}
 		}
 	}
 	return rows
+}
+
+// currentThread returns the thread under the Comments-tab cursor.
+func (v *detailView) currentThread() (CommentThread, bool) {
+	if v.tab != tabComments {
+		return CommentThread{}, false
+	}
+	r := v.vp[v.tab].Current()
+	if r == nil || r.Kind != RowComment {
+		return CommentThread{}, false
+	}
+	id, ok := r.Item.(int)
+	if !ok {
+		return CommentThread{}, false
+	}
+	t, ok := v.threadFor[id]
+	return t, ok
 }
 
 // commentExcerptRows renders the diff line an inline thread anchors to —
@@ -407,7 +438,14 @@ func (v *detailView) render(a *app, s *Screen) {
 	}
 	paintSeparator(s, 3, a.w)
 
-	v.vp[v.tab].Paint(s, Rect{X: 0, Y: 4, W: a.w, H: a.h - 5})
+	rect := Rect{X: 0, Y: 4, W: a.w, H: a.h - 5}
+	v.vp[v.tab].Paint(s, rect)
+	// The reply-target thread lights up so C never posts somewhere invisible.
+	if t, ok := v.currentThread(); ok {
+		if span, ok := v.threadSpan[t.Root.ID]; ok {
+			focusViewportRows(s, &v.vp[v.tab], rect, span[0], span[1])
+		}
+	}
 }
 
 func stateStyle(state string) StyleID {
@@ -517,15 +555,12 @@ func (v *detailView) handle(a *app, k Key) {
 	case isKey(k, 'C'):
 		// Reply when the cursor is on a Comments-tab thread, otherwise a new
 		// general PR comment.
-		parent := 0
-		if v.tab == tabComments {
-			if r := vp.Current(); r != nil && r.Kind == RowComment {
-				if id, ok := r.Item.(int); ok {
-					parent = id
-				}
-			}
+		parent, target := 0, ""
+		if t, ok := v.currentThread(); ok {
+			parent = t.Root.ID
+			target = replyTarget(t)
 		}
-		openCommentEditor(a, v.prID, nil, parent)
+		openCommentEditor(a, v.prID, nil, parent, target)
 	case isKey(k, 'D'):
 		openInDiffTool(a, v.prID, "")
 	case isKey(k, '?'):
@@ -542,10 +577,23 @@ func (v *detailView) footer(a *app) string {
 			base += "Enter:diffツール  v:内蔵diff  "
 		}
 	}
+	cKey := "C:コメント"
 	if v.tab == tabComments {
 		base += "Enter:コードへ  "
+		if t, ok := v.currentThread(); ok {
+			cKey = "C:" + replyTarget(t)
+		}
 	}
-	return base + "C:コメント  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
+	return base + cKey + "  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
+}
+
+// replyTarget names where a reply will land: "返信→tanaka L15".
+func replyTarget(t CommentThread) string {
+	s := "返信→" + t.Root.User.Name()
+	if label := t.lineLabel(); label != "" {
+		s += " " + label
+	}
+	return s
 }
 
 func joinComma(names []string) string {

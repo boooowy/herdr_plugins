@@ -41,6 +41,7 @@ type Config struct {
 	MDCodeFg    string `toml:"md_code_fg"`    // in-tab markdown code
 	MDCodeBg    string `toml:"md_code_bg"`    // code-block / inline-code background
 	CommentBg   string `toml:"comment_bg"`    // comment-area background
+	FocusBg     string `toml:"focus_bg"`      // focused thread / selected lines background
 	AddFg       string `toml:"add_fg"`
 	DelFg       string `toml:"del_fg"`
 	HunkFg      string `toml:"hunk_fg"`
@@ -70,6 +71,7 @@ func defaultConfig() Config {
 		MDCodeFg:          "#e5c07b",
 		MDCodeBg:          "#161821",
 		CommentBg:         "#20222e",
+		FocusBg:           "#2e3350",
 		AddFg:             "green",
 		DelFg:             "red",
 		HunkFg:            "cyan",
@@ -136,6 +138,9 @@ func loadConfig() Config {
 	}
 	if cfg.CommentBg == "" {
 		cfg.CommentBg = defaultConfig().CommentBg
+	}
+	if cfg.FocusBg == "" {
+		cfg.FocusBg = defaultConfig().FocusBg
 	}
 	return cfg
 }

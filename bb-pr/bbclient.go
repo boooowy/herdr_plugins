@@ -139,12 +139,20 @@ func (c *bbClient) postJSON(rawURL string, payload, out any) error {
 func (c *bbClient) postComment(ws, repo string, id int, body string, inline *InlineAnchor, parentID int) (*Comment, error) {
 	payload := map[string]any{"content": map[string]any{"raw": body}}
 	if inline != nil {
+		// Multi-line ranges: start_to/start_from is the range START, to/from
+		// its END (official API contract since 2025-09).
 		in := map[string]any{"path": inline.Path}
 		if inline.To != nil {
 			in["to"] = *inline.To
 		}
 		if inline.From != nil {
 			in["from"] = *inline.From
+		}
+		if inline.StartTo != nil {
+			in["start_to"] = *inline.StartTo
+		}
+		if inline.StartFrom != nil {
+			in["start_from"] = *inline.StartFrom
 		}
 		payload["inline"] = in
 	}

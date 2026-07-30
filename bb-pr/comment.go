@@ -16,18 +16,22 @@ import (
 // saved body to Bitbucket when the editor exits.
 
 const (
-	envCommentFile   = "BBPR_COMMENT_FILE"
-	envCommentPath   = "BBPR_COMMENT_PATH"
-	envCommentTo     = "BBPR_COMMENT_TO"
-	envCommentFrom   = "BBPR_COMMENT_FROM"
-	envCommentParent = "BBPR_COMMENT_PARENT"
+	envCommentFile      = "BBPR_COMMENT_FILE"
+	envCommentPath      = "BBPR_COMMENT_PATH"
+	envCommentTo        = "BBPR_COMMENT_TO"
+	envCommentFrom      = "BBPR_COMMENT_FROM"
+	envCommentStartTo   = "BBPR_COMMENT_START_TO"
+	envCommentStartFrom = "BBPR_COMMENT_START_FROM"
+	envCommentParent    = "BBPR_COMMENT_PARENT"
 )
 
 // openCommentEditor opens the comment-composer popup. inline anchors a code
-// line (nil = general PR comment); parentID > 0 replies to a thread. A
-// background poller watches for comment-ui's success marker and refreshes
-// the comments in place — no manual reload needed.
-func openCommentEditor(a *app, prID int, inline *InlineAnchor, parentID int) {
+// line or range (nil = general PR comment); parentID > 0 replies to a
+// thread; target overrides the status label so the user sees exactly where
+// the comment will land. A background poller watches for comment-ui's
+// success marker and refreshes the comments in place — no manual reload
+// needed.
+func openCommentEditor(a *app, prID int, inline *InlineAnchor, parentID int, target string) {
 	path := filepath.Join(stateDir(), fmt.Sprintf("comment-%d-%d.md", prID, time.Now().UnixNano()))
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		a.status = "下書きファイルを作れません: " + err.Error()
@@ -39,20 +43,27 @@ func openCommentEditor(a *app, prID int, inline *InlineAnchor, parentID int) {
 		envPRID:        strconv.Itoa(prID),
 		envCommentFile: path,
 	}
-	target := "PRへのコメント"
+	if target == "" {
+		target = "PRへのコメント"
+	}
 	if inline != nil {
 		env[envCommentPath] = inline.Path
-		if inline.To != nil {
-			env[envCommentTo] = strconv.Itoa(*inline.To)
+		for _, f := range []struct {
+			key string
+			val *int
+		}{
+			{envCommentTo, inline.To},
+			{envCommentFrom, inline.From},
+			{envCommentStartTo, inline.StartTo},
+			{envCommentStartFrom, inline.StartFrom},
+		} {
+			if f.val != nil {
+				env[f.key] = strconv.Itoa(*f.val)
+			}
 		}
-		if inline.From != nil {
-			env[envCommentFrom] = strconv.Itoa(*inline.From)
-		}
-		target = inline.Path
 	}
 	if parentID > 0 {
 		env[envCommentParent] = strconv.Itoa(parentID)
-		target = "スレッドへの返信"
 	}
 	if _, err := a.herdr.pluginPaneOpen(pluginID, "comment", "popup", true, env, "80%", "80%"); err != nil {
 		a.status = "コメント編集を開けません: " + err.Error()
@@ -154,12 +165,16 @@ func runCommentUI() {
 	var inline *InlineAnchor
 	if p := os.Getenv(envCommentPath); p != "" {
 		inline = &InlineAnchor{Path: p}
-		if n, err := strconv.Atoi(os.Getenv(envCommentTo)); err == nil && n > 0 {
-			inline.To = &n
+		lineEnv := func(key string) *int {
+			if n, err := strconv.Atoi(os.Getenv(key)); err == nil && n > 0 {
+				return &n
+			}
+			return nil
 		}
-		if n, err := strconv.Atoi(os.Getenv(envCommentFrom)); err == nil && n > 0 {
-			inline.From = &n
-		}
+		inline.To = lineEnv(envCommentTo)
+		inline.From = lineEnv(envCommentFrom)
+		inline.StartTo = lineEnv(envCommentStartTo)
+		inline.StartFrom = lineEnv(envCommentStartFrom)
 	}
 	parent, _ := strconv.Atoi(os.Getenv(envCommentParent))
 
