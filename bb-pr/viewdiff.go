@@ -113,6 +113,13 @@ func (v *diffView) threadsFor(a *app, f *FileDiff, st *DiffStatEntry) (map[[2]in
 		}
 	}
 
+	return anchorThreads(f, threads)
+}
+
+// anchorThreads maps each thread onto the (hunk, line) it anchors to;
+// threads with no matching line (outdated, truncated diff) come back as
+// orphans.
+func anchorThreads(f *FileDiff, threads []CommentThread) (map[[2]int][]CommentThread, []CommentThread) {
 	anchored := map[[2]int][]CommentThread{}
 	var orphans []CommentThread
 	for _, t := range threads {
@@ -148,7 +155,7 @@ func (v *diffView) rebuild(a *app) {
 	addThread := func(t CommentThread) {
 		v.threadFor[t.Root.ID] = t
 		start := len(rows)
-		rows = append(rows, threadRows(t, a.w, now, "", nil)...)
+		rows = append(rows, threadRows(t, a.w, now, "")...)
 		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
 	}
 

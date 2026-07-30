@@ -56,8 +56,12 @@ func TestMDStyledLinesBlocks(t *testing.T) {
 	if total != 60 {
 		t.Errorf("code row must pad to full width, got %d", total)
 	}
-	if g := findLine(t, lines, "── go "); g[0].Style != styleDim {
-		t.Errorf("fence bar with lang: %+v", g)
+	for _, spans := range lines {
+		for _, sp := range spans {
+			if strings.Contains(sp.Text, "── go") {
+				t.Errorf("fence bars must be gone: %+v", spans)
+			}
+		}
 	}
 	if findLine(t, lines, "after")[0].Style != styleNone {
 		t.Error("text after the closing fence must return to base")

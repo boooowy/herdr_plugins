@@ -10,9 +10,8 @@ import (
 // background (onCmtBg), replies are indented under a ↳ header, and a plain
 // blank row separates threads. The root header row is selectable so the
 // cursor can walk threads. anchorLabel ("L486–496" etc.) prefixes the
-// header when non-empty; excerpt rows (the anchored diff line, see
-// commentExcerptRows) slot in right under the header.
-func threadRows(t CommentThread, width int, now time.Time, anchorLabel string, excerpt []Row) []Row {
+// header when non-empty.
+func threadRows(t CommentThread, width int, now time.Time, anchorLabel string) []Row {
 	var rows []Row
 	bg := func(spans []Span, kind RowKind, item any, selectable bool) {
 		rows = append(rows, Row{Kind: kind, Item: item, Selectable: selectable,
@@ -33,7 +32,6 @@ func threadRows(t CommentThread, width int, now time.Time, anchorLabel string, e
 		header = append(header, Span{" [outdated]", onCmtBg(styleOutdated)})
 	}
 	bg(header, RowComment, t.Root.ID, true)
-	rows = append(rows, excerpt...)
 
 	appendBody := func(c Comment, indent string) {
 		if c.Deleted {

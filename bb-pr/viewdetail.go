@@ -237,28 +237,90 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 
 	// addThread appends a thread's rows and records its span (sans the
 	// trailing gap row) for the focus highlight.
-	addThread := func(t CommentThread, label string, excerpt []Row) {
+	addThread := func(t CommentThread, label string) {
 		v.threadFor[t.Root.ID] = t
 		start := len(rows)
-		rows = append(rows, threadRows(t, a.w, now, label, excerpt)...)
+		rows = append(rows, threadRows(t, a.w, now, label)...)
 		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
 	}
 
 	if len(general) > 0 {
 		section(fmt.Sprintf("PR コメント (%d)", len(general)))
 		for _, t := range general {
-			addThread(t, "", nil)
+			addThread(t, "")
 		}
 	}
 	if inlineTotal > 0 {
 		section(fmt.Sprintf("インラインコメント (%d)", inlineTotal))
 		for _, path := range orderedInlinePaths(byFile) {
 			rows = append(rows, textRow(Span{" 📄 ", styleNone}, Span{path, styleTitle}), textRow())
-			for _, t := range byFile[path] {
+			threads := byFile[path]
+			for _, t := range threads {
 				v.inlineThreadFor[t.Root.ID] = t
-				addThread(t, t.lineLabel(), commentExcerptRows(t, d.files, a.w))
+			}
+			// Commented hunks render diff-view style — full hunk context with
+			// each thread right under its anchor line. Hunks without comments
+			// are skipped; unanchorable threads (outdated, truncated diff, or
+			// the diff not loaded yet) fall back to the flat layout below.
+			f := fileDiffFor(d.files, path)
+			anchored, orphans := anchorThreads(f, threads)
+			if f != nil {
+				for hi := range f.Hunks {
+					n := hunkCommentCount(anchored, hi)
+					if n == 0 {
+						continue
+					}
+					rows = append(rows, commentHunkHeader(&f.Hunks[hi], n, a.w))
+					for li, l := range f.Hunks[hi].Lines {
+						rows = append(rows, unselectableRows(diffLineRows(l, 4, a.w, false))...)
+						for _, t := range anchored[[2]int{hi, li}] {
+							addThread(t, t.lineLabel())
+						}
+					}
+					rows = append(rows, textRow())
+				}
+			}
+			for _, t := range orphans {
+				addThread(t, t.lineLabel())
 			}
 		}
+	}
+	return rows
+}
+
+// fileDiffFor finds the parsed diff for path (nil when the diff is still
+// loading or the file is missing from a truncated diff).
+func fileDiffFor(files []FileDiff, path string) *FileDiff {
+	for i := range files {
+		if files[i].Path() == path || files[i].OldPath == path {
+			return &files[i]
+		}
+	}
+	return nil
+}
+
+// commentHunkHeader is the Comments-tab hunk banner:
+// ─── @@ -a,b +c,d @@ section ─── 💬n ───
+func commentHunkHeader(h *Hunk, count, width int) Row {
+	head := fmt.Sprintf("─── @@ -%d,%d +%d,%d @@ %s ", h.OldStart, h.OldCount, h.NewStart, h.NewCount,
+		truncateWidth(h.Section, width/2))
+	tail := fmt.Sprintf(" 💬%d ───", count)
+	pad := width - displayWidth(head) - displayWidth(tail) - 1
+	if pad < 0 {
+		pad = 0
+	}
+	return textRow(
+		Span{head + strings.Repeat("─", pad), styleHunk},
+		Span{tail, styleHunk},
+	)
+}
+
+// unselectableRows strips the cursor stops off diff-line rows: on the
+// Comments tab j/k walks threads, not code.
+func unselectableRows(rows []Row) []Row {
+	for i := range rows {
+		rows[i].Selectable = false
+		rows[i].Item = nil
 	}
 	return rows
 }
@@ -278,58 +340,6 @@ func (v *detailView) currentThread() (CommentThread, bool) {
 	}
 	t, ok := v.threadFor[id]
 	return t, ok
-}
-
-// commentExcerptRows renders the diff line an inline thread anchors to —
-// the "which code is this about?" context the Comments tab used to lack.
-// Nil when the diff isn't loaded yet, the thread is outdated, or the line
-// isn't in the current diff (all fall back to the plain header).
-func commentExcerptRows(t CommentThread, files []FileDiff, width int) []Row {
-	l, ok := anchoredDiffLine(t, files)
-	if !ok {
-		return nil
-	}
-	no := l.NewNo
-	if no == 0 {
-		no = l.OldNo
-	}
-	marker, style := " ", styleNone
-	switch l.Kind {
-	case LineAdd:
-		marker, style = "+", styleAdd
-	case LineDel:
-		marker, style = "-", styleDel
-	}
-	text := strings.ReplaceAll(l.Text, "\t", "    ")
-	spans := []Span{
-		{fmt.Sprintf("   %4d ", no), onCmtBg(styleDim)},
-		{marker + " ", onCmtBg(style)},
-		{truncateWidth(text, width-11), onCmtBg(style)},
-	}
-	return []Row{{Kind: RowComment, Spans: padBgRow(spans, width)}}
-}
-
-// anchoredDiffLine finds the diff line an inline thread points at (a range
-// comment anchors at its last line, matching lineLabel).
-func anchoredDiffLine(t CommentThread, files []FileDiff) (DiffLine, bool) {
-	if t.Root.Inline == nil {
-		return DiffLine{}, false
-	}
-	path := t.Root.Inline.Path
-	for i := range files {
-		f := &files[i]
-		if f.Path() != path && f.OldPath != path {
-			continue
-		}
-		for hi := range f.Hunks {
-			for _, l := range f.Hunks[hi].Lines {
-				if t.matchesLine(l) {
-					return l, true
-				}
-			}
-		}
-	}
-	return DiffLine{}, false
 }
 
 // orderedInlinePaths sorts the inline-comment files so the one holding the

@@ -36,17 +36,6 @@ func mdStyledLines(text string, width int, base StyleID) [][]Span {
 			out = append(out, append([]Span{lead}, ws...))
 		}
 	}
-	fenceBar := func(lang string) {
-		bar := "── "
-		if lang != "" {
-			bar += lang + " "
-		}
-		if pad := width - displayWidth(bar); pad > 0 {
-			bar += strings.Repeat("─", pad)
-		}
-		emit([]Span{{bar, styleDim}})
-	}
-
 	inFence := false
 	fenceLang := ""
 	var fenceBuf []string
@@ -60,13 +49,13 @@ func mdStyledLines(text string, width int, base StyleID) [][]Span {
 		indent := line[:len(line)-len(trimmed)]
 		switch {
 		case strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~"):
+			// No fence bars: the block's background rectangle is delimiter
+			// enough.
 			if inFence {
 				closeFence()
-				fenceBar("")
 			} else {
 				inFence = true
 				fenceLang = strings.Trim(trimmed, "`~ ")
-				fenceBar(fenceLang)
 			}
 		case inFence:
 			fenceBuf = append(fenceBuf, line)
