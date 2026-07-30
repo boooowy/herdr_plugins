@@ -24,7 +24,9 @@ const (
 )
 
 // openCommentEditor opens the comment-composer popup. inline anchors a code
-// line (nil = general PR comment); parentID > 0 replies to a thread.
+// line (nil = general PR comment); parentID > 0 replies to a thread. A
+// background poller watches for comment-ui's success marker and refreshes
+// the comments in place — no manual reload needed.
 func openCommentEditor(a *app, prID int, inline *InlineAnchor, parentID int) {
 	path := filepath.Join(stateDir(), fmt.Sprintf("comment-%d-%d.md", prID, time.Now().UnixNano()))
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
@@ -56,7 +58,35 @@ func openCommentEditor(a *app, prID int, inline *InlineAnchor, parentID int) {
 		a.status = "コメント編集を開けません: " + err.Error()
 		return
 	}
-	a.status = target + " を編集中 — 保存して閉じると投稿、空のままなら中止（反映は r で再読込）"
+	a.status = target + " を編集中 — 保存して閉じると投稿、空のままなら中止"
+	go watchCommentMarker(a, prID, path)
+}
+
+// watchCommentMarker polls for comment-ui's success marker (draft+".posted")
+// and refetches the PR's comments when it appears. A vanished draft without
+// a marker means the user cancelled.
+func watchCommentMarker(a *app, prID int, draft string) {
+	marker := draft + ".posted"
+	for i := 0; i < 1800; i++ { // up to 15 min at 500ms
+		time.Sleep(500 * time.Millisecond)
+		if _, err := os.Stat(marker); err == nil {
+			os.Remove(marker)
+			a.resultCh <- func(a *app) {
+				a.status = "コメントを投稿しました"
+				a.detailFor(prID).comments = nil
+				for _, vw := range a.stack {
+					if dv, ok := vw.(*detailView); ok && dv.prID == prID {
+						dv.load(a, false) // refetches only the comments
+						break
+					}
+				}
+			}
+			return
+		}
+		if _, err := os.Stat(draft); os.IsNotExist(err) {
+			return // cancelled
+		}
+	}
 }
 
 // runCommentUI is the comment pane's entrypoint: edit the draft, then post.
@@ -99,6 +129,7 @@ func runCommentUI() {
 		os.Remove(file)
 		return // empty draft = cancel, close quietly
 	}
+	fmt.Println("投稿中…") // the POST takes ~1s; show why the popup lingers
 
 	email, token, ok := cfg.credentials()
 	if !ok {
@@ -123,7 +154,13 @@ func runCommentUI() {
 		commentFail(cfg, err.Error(), file)
 		return
 	}
+	// Marker first (the viewer polls it), then the draft.
+	if err := os.WriteFile(file+".posted", []byte("ok"), 0o600); err != nil {
+		debugf("comment: marker: %v", err)
+	}
 	os.Remove(file)
+	fmt.Println("✓ 投稿しました")
+	time.Sleep(700 * time.Millisecond) // let the message register before the popup closes
 }
 
 // commentFail shows the post error full-screen (the draft survives on disk)

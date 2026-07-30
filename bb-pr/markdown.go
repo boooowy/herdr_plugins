@@ -6,6 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // Markdown support, two-tier: mdStyledLines gives descriptions and comments
@@ -15,48 +18,250 @@ import (
 
 const envMDFile = "BBPR_MD_FILE"
 
-// mdStyledLines renders markdown source as styled, wrapped display lines:
-// headings, fenced code, quotes, and list bullets get colors; body text
-// keeps base. Deliberately line-based — enough to scan a PR description
-// without a real renderer.
+// mdStyledLines renders markdown source as styled, wrapped display lines —
+// the in-tab renderer for descriptions and comment bodies. Block elements
+// (headings, lists, quotes, fences, rules, tables) and inline ones (code,
+// bold, links) are interpreted; anything ambiguous passes through verbatim.
+// The `m` popup covers full-fidelity rendering.
 func mdStyledLines(text string, width int, base StyleID) [][]Span {
 	if width < 10 {
 		width = 10
 	}
 	var out [][]Span
+	emit := func(spans []Span) { out = append(out, wrapSpans(spans, width)...) }
+	// emitHanging wraps content at a marker-indented width, prefixing the
+	// marker on the first line and matching spaces after.
+	emitHanging := func(marker string, markerStyle StyleID, content []Span) {
+		w := width - displayWidth(marker)
+		if w < 10 {
+			w = 10
+		}
+		for i, ws := range wrapSpans(content, w) {
+			lead := Span{marker, markerStyle}
+			if i > 0 {
+				lead = Span{strings.Repeat(" ", displayWidth(marker)), styleNone}
+			}
+			out = append(out, append([]Span{lead}, ws...))
+		}
+	}
+
 	inFence := false
 	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		trimmed := strings.TrimLeft(line, " \t")
-		style := base
+		indent := line[:len(line)-len(trimmed)]
 		switch {
 		case strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~"):
+			bar := "── "
+			if lang := strings.Trim(trimmed, "`~ "); lang != "" && !inFence {
+				bar += lang + " "
+			}
 			inFence = !inFence
-			style = styleMeta
+			if pad := width - displayWidth(bar); pad > 0 {
+				bar += strings.Repeat("─", pad)
+			}
+			emit([]Span{{bar, styleDim}})
 		case inFence:
-			style = styleMeta
+			emit([]Span{{line, styleMDCode}})
 		case strings.HasPrefix(trimmed, "#"):
-			style = styleTitle
+			level := 0
+			for level < len(trimmed) && trimmed[level] == '#' {
+				level++
+			}
+			markers := [...]string{"◆ ", "◆ ", "◇ ", "◇ ", "・", "・"}
+			emit([]Span{{markers[min(level, 6)-1] + strings.TrimSpace(trimmed[level:]), styleMDHead}})
 		case strings.HasPrefix(trimmed, ">"):
-			style = styleDim
+			body := strings.TrimPrefix(strings.TrimPrefix(trimmed, ">"), " ")
+			emitHanging(indent+"▎ ", styleDim, mdInlineSpans(body, styleDim))
+		case isHRule(trimmed):
+			emit([]Span{{strings.Repeat("─", width), styleDim}})
+		case strings.HasPrefix(trimmed, "|"):
+			emit([]Span{{indent + mdTableLine(trimmed), tableStyle(trimmed, base)}})
 		default:
 			if marker, rest, ok := splitBullet(line); ok {
-				wrapped := wrapText(rest, width-displayWidth(marker))
-				if len(wrapped) == 0 {
-					wrapped = []string{""}
+				m := indent + "• "
+				if len(indent) >= 2 {
+					m = indent + "◦ "
 				}
-				out = append(out, []Span{{marker, styleHunk}, {wrapped[0], base}})
-				pad := strings.Repeat(" ", displayWidth(marker))
-				for _, w := range wrapped[1:] {
-					out = append(out, []Span{{pad + w, base}})
+				if isNumberedMarker(marker) {
+					m = marker // keep "12. "
 				}
+				switch {
+				case strings.HasPrefix(rest, "[ ] "):
+					m, rest = m+"☐ ", rest[4:]
+				case strings.HasPrefix(rest, "[x] ") || strings.HasPrefix(rest, "[X] "):
+					m, rest = m+"☑ ", rest[4:]
+				}
+				emitHanging(m, styleHunk, mdInlineSpans(rest, base))
 				continue
 			}
-		}
-		for _, w := range wrapText(line, width) {
-			out = append(out, []Span{{w, style}})
+			emit(mdInlineSpans(line, base))
 		}
 	}
 	return out
+}
+
+// mdInlineSpans parses one line's inline markdown: `code`, **bold**,
+// *italic*, [text](url) (URL concealed), and bare URLs. Unclosed markers
+// pass through untouched; backslash escapes before punctuation are dropped.
+func mdInlineSpans(line string, base StyleID) []Span {
+	var spans []Span
+	var plain strings.Builder
+	flush := func() {
+		if plain.Len() > 0 {
+			spans = append(spans, Span{plain.String(), base})
+			plain.Reset()
+		}
+	}
+	i := 0
+	for i < len(line) {
+		rest := line[i:]
+		switch {
+		case rest[0] == '\\' && len(rest) > 1 && rest[1] < 0x80 && strings.ContainsRune("\\`*_{}[]()#+-.!|>", rune(rest[1])):
+			plain.WriteByte(rest[1])
+			i += 2
+			continue
+		case rest[0] == '`':
+			if end := strings.Index(rest[1:], "`"); end >= 0 {
+				flush()
+				spans = append(spans, Span{rest[1 : end+1], styleMDCode})
+				i += end + 2
+				continue
+			}
+		case strings.HasPrefix(rest, "**"):
+			if end := strings.Index(rest[2:], "**"); end > 0 {
+				flush()
+				spans = append(spans, Span{rest[2 : end+2], styleTitle})
+				i += end + 4
+				continue
+			}
+		case rest[0] == '*' && len(rest) > 2 && rest[1] != ' ' && rest[1] != '*':
+			if end := strings.IndexByte(rest[1:], '*'); end > 0 && rest[end] != ' ' {
+				flush()
+				spans = append(spans, Span{rest[1 : end+1], styleItalic})
+				i += end + 2
+				continue
+			}
+		case rest[0] == '[':
+			if ct := strings.Index(rest, "]("); ct > 0 {
+				if cu := strings.IndexByte(rest[ct:], ')'); cu > 0 {
+					flush()
+					spans = append(spans, Span{rest[1:ct], styleMDLink})
+					i += ct + cu + 1
+					continue
+				}
+			}
+		case strings.HasPrefix(rest, "http://") || strings.HasPrefix(rest, "https://"):
+			end := strings.IndexAny(rest, " \t)>」）")
+			if end < 0 {
+				end = len(rest)
+			}
+			flush()
+			spans = append(spans, Span{rest[:end], styleMDLink})
+			i += end
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(rest)
+		plain.WriteRune(r)
+		i += size
+	}
+	flush()
+	if len(spans) == 0 {
+		spans = []Span{{"", base}}
+	}
+	return spans
+}
+
+// wrapSpans wraps a styled line at width cells, preserving span styles
+// across the breaks.
+func wrapSpans(spans []Span, width int) [][]Span {
+	if width < 1 {
+		width = 1
+	}
+	var out [][]Span
+	var cur []Span
+	curW := 0
+	for _, sp := range spans {
+		var b strings.Builder
+		for _, r := range sp.Text {
+			rw := runewidth.RuneWidth(r)
+			if curW+rw > width {
+				if b.Len() > 0 {
+					cur = append(cur, Span{b.String(), sp.Style})
+					b.Reset()
+				}
+				out = append(out, cur)
+				cur, curW = nil, 0
+			}
+			b.WriteRune(r)
+			curW += rw
+		}
+		if b.Len() > 0 {
+			cur = append(cur, Span{b.String(), sp.Style})
+		}
+	}
+	return append(out, cur)
+}
+
+// isHRule reports a thematic break: a line of only -, * or _ (3+ of one kind).
+func isHRule(t string) bool {
+	t = strings.ReplaceAll(t, " ", "")
+	if len(t) < 3 {
+		return false
+	}
+	c := t[0]
+	if c != '-' && c != '*' && c != '_' {
+		return false
+	}
+	for i := 1; i < len(t); i++ {
+		if t[i] != c {
+			return false
+		}
+	}
+	return true
+}
+
+// mdTableLine restyles a pipe-table row: │ borders, ─ in delimiter rows.
+func mdTableLine(t string) string {
+	if isTableDelimiter(t) {
+		t = strings.Map(func(r rune) rune {
+			switch r {
+			case '|':
+				return '┼'
+			case '-', ':':
+				return '─'
+			}
+			return r
+		}, t)
+		return t
+	}
+	return strings.ReplaceAll(t, "|", "│")
+}
+
+func isTableDelimiter(t string) bool {
+	seen := false
+	for _, r := range t {
+		switch r {
+		case '|', ' ':
+		case '-', ':':
+			seen = true
+		default:
+			return false
+		}
+	}
+	return seen
+}
+
+func tableStyle(t string, base StyleID) StyleID {
+	if isTableDelimiter(t) {
+		return styleDim
+	}
+	return base
+}
+
+// isNumberedMarker reports whether a splitBullet marker is "12. "-style.
+func isNumberedMarker(m string) bool {
+	m = strings.TrimLeft(m, " \t")
+	return len(m) > 0 && m[0] >= '0' && m[0] <= '9'
 }
 
 // splitBullet splits "  - item" (or "12. item") into marker and rest;

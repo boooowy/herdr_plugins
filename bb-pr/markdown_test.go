@@ -5,41 +5,124 @@ import (
 	"testing"
 )
 
-func TestMDStyledLines(t *testing.T) {
-	md := "# 見出し\n\n本文です\n- 項目1\n> 引用\n```\ncode line\n```\nafter"
-	lines := mdStyledLines(md, 40, styleNone)
-
-	find := func(text string) []Span {
-		for _, spans := range lines {
-			joined := ""
-			for _, sp := range spans {
-				joined += sp.Text
-			}
-			if strings.Contains(joined, text) {
-				return spans
-			}
+func findLine(t *testing.T, lines [][]Span, text string) []Span {
+	t.Helper()
+	for _, spans := range lines {
+		joined := ""
+		for _, sp := range spans {
+			joined += sp.Text
 		}
-		t.Fatalf("line containing %q not found in %v", text, lines)
-		return nil
+		if strings.Contains(joined, text) {
+			return spans
+		}
 	}
+	t.Fatalf("line containing %q not found in %v", text, lines)
+	return nil
+}
 
-	if find("見出し")[0].Style != styleTitle {
-		t.Error("heading must use styleTitle")
+func TestMDStyledLinesBlocks(t *testing.T) {
+	md := "# 見出し\n\n本文です\n- 項目1\n- [ ] 未了\n- [x] 完了\n  - ネスト\n> 引用\n```go\ncode line\n```\nafter\n---\n| A | B |\n|---|---|"
+	lines := mdStyledLines(md, 60, styleNone)
+
+	if h := findLine(t, lines, "見出し"); h[0].Style != styleMDHead || !strings.HasPrefix(h[0].Text, "◆ ") {
+		t.Errorf("heading: %+v", h)
 	}
-	if find("本文です")[0].Style != styleNone {
+	if findLine(t, lines, "本文です")[0].Style != styleNone {
 		t.Error("body must keep base style")
 	}
-	if b := find("項目1"); b[0].Style != styleHunk || b[0].Text != "- " {
+	if b := findLine(t, lines, "項目1"); b[0].Text != "• " || b[0].Style != styleHunk {
 		t.Errorf("bullet marker: %+v", b)
 	}
-	if find("引用")[0].Style != styleDim {
-		t.Error("quote must be dim")
+	if cb := findLine(t, lines, "未了"); cb[0].Text != "• ☐ " {
+		t.Errorf("unchecked box: %+v", cb)
 	}
-	if find("code line")[0].Style != styleMeta {
-		t.Error("fenced code must use styleMeta")
+	if cb := findLine(t, lines, "完了"); cb[0].Text != "• ☑ " {
+		t.Errorf("checked box: %+v", cb)
 	}
-	if find("after")[0].Style != styleNone {
+	if n := findLine(t, lines, "ネスト"); n[0].Text != "  ◦ " {
+		t.Errorf("nested bullet: %+v", n)
+	}
+	if q := findLine(t, lines, "引用"); !strings.Contains(q[0].Text, "▎") || q[0].Style != styleDim {
+		t.Errorf("quote: %+v", q)
+	}
+	if findLine(t, lines, "code line")[0].Style != styleMDCode {
+		t.Error("fenced code must use styleMDCode")
+	}
+	if g := findLine(t, lines, "── go "); g[0].Style != styleDim {
+		t.Errorf("fence bar with lang: %+v", g)
+	}
+	if findLine(t, lines, "after")[0].Style != styleNone {
 		t.Error("text after the closing fence must return to base")
+	}
+	if hr := findLine(t, lines, "────"); hr[0].Style != styleDim || displayWidth(hr[0].Text) != 60 {
+		t.Errorf("hrule: %+v", hr)
+	}
+	if tb := findLine(t, lines, "│ A │ B │"); tb == nil {
+		t.Error("table pipes must become │")
+	}
+	if td := findLine(t, lines, "┼"); td[0].Style != styleDim {
+		t.Errorf("table delimiter: %+v", td)
+	}
+}
+
+func TestMDInlineSpans(t *testing.T) {
+	spans := mdInlineSpans("a `code` **強調** [リンク](https://x.example/) https://y.example/ \\(esc\\)", styleNone)
+	joined := ""
+	byStyle := map[StyleID]string{}
+	for _, sp := range spans {
+		joined += sp.Text
+		byStyle[sp.Style] += sp.Text
+	}
+	if byStyle[styleMDCode] != "code" {
+		t.Errorf("code span: %q", byStyle[styleMDCode])
+	}
+	if byStyle[styleTitle] != "強調" {
+		t.Errorf("bold span: %q", byStyle[styleTitle])
+	}
+	if byStyle[styleMDLink] != "リンク"+"https://y.example/" {
+		t.Errorf("link spans: %q", byStyle[styleMDLink])
+	}
+	if strings.Contains(joined, "https://x.example/") {
+		t.Error("link URL must be concealed")
+	}
+	if !strings.Contains(joined, "(esc)") || strings.Contains(joined, `\(`) {
+		t.Errorf("escapes must be unescaped: %q", joined)
+	}
+
+	// Unclosed markers pass through untouched.
+	raw := "a `unclosed and **half"
+	joined = ""
+	for _, sp := range mdInlineSpans(raw, styleNone) {
+		joined += sp.Text
+	}
+	if joined != raw {
+		t.Errorf("unclosed passthrough: %q", joined)
+	}
+
+	// snake_case must never be italicized.
+	joined = ""
+	for _, sp := range mdInlineSpans("foo_bar_baz", styleNone) {
+		if sp.Style != styleNone {
+			t.Errorf("snake_case styled: %+v", sp)
+		}
+		joined += sp.Text
+	}
+	if joined != "foo_bar_baz" {
+		t.Errorf("snake_case: %q", joined)
+	}
+}
+
+func TestWrapSpans(t *testing.T) {
+	lines := wrapSpans([]Span{{"abcd", styleNone}, {"efgh", styleTitle}}, 6)
+	if len(lines) != 2 {
+		t.Fatalf("lines = %v", lines)
+	}
+	// Break lands inside the second span: style must survive the split.
+	if lines[0][1].Text != "ef" || lines[0][1].Style != styleTitle || lines[1][0].Text != "gh" || lines[1][0].Style != styleTitle {
+		t.Errorf("split spans: %v", lines)
+	}
+	if got := wrapSpans([]Span{{"", styleNone}}, 10); len(got) != 1 {
+		t.Errorf("empty line: %v", got)
 	}
 }
 
@@ -49,8 +132,8 @@ func TestMDStyledLinesWrapsAndKeepsBlanks(t *testing.T) {
 	if len(lines) != 4 {
 		t.Fatalf("got %d lines: %v", len(lines), lines)
 	}
-	if lines[2][0].Text != "" {
-		t.Errorf("blank line must survive: %v", lines[2])
+	if len(lines[2]) != 0 {
+		t.Errorf("blank line must survive as an empty row: %v", lines[2])
 	}
 }
 

@@ -26,6 +26,10 @@ const (
 	styleChangesReq            // changes-requested reviewers / -stats
 	styleError                 // error banners
 	styleAuthor                // comment/PR author names
+	styleMDHead                // markdown headings
+	styleMDCode                // markdown inline code + fenced blocks
+	styleMDLink                // markdown link text / bare URLs
+	styleItalic                // markdown emphasis
 )
 
 // sgrTable builds the SGR sequence for each style from the user config.
@@ -47,6 +51,10 @@ func sgrTable(cfg Config) map[StyleID]string {
 		styleChangesReq:    "\x1b[" + colorCode(cfg.DelFg, false) + "m",
 		styleError:         "\x1b[1;31m",
 		styleAuthor:        "\x1b[1;34m",
+		styleMDHead:        "\x1b[1;" + colorCode(cfg.MDHeadingFg, false) + "m",
+		styleMDCode:        "\x1b[" + colorCode(cfg.MDCodeFg, false) + "m",
+		styleMDLink:        "\x1b[4;36m",
+		styleItalic:        "\x1b[3m",
 	}
 }
 

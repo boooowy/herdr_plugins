@@ -37,6 +37,8 @@ type Config struct {
 	MarkdownViewer    []string `toml:"markdown_viewer"` // m key; {file} = md file
 	CommentEditor     []string `toml:"comment_editor"`  // C key; empty = $EDITOR → nvim
 
+	MDHeadingFg     string `toml:"md_heading_fg"` // in-tab markdown headings
+	MDCodeFg        string `toml:"md_code_fg"`    // in-tab markdown code
 	AddFg           string `toml:"add_fg"`
 	DelFg           string `toml:"del_fg"`
 	HunkFg          string `toml:"hunk_fg"`
@@ -64,6 +66,8 @@ func defaultConfig() Config {
 		DifftoolWidth:     "95%",
 		DifftoolHeight:    "95%",
 		MarkdownViewer:    []string{"glow", "-p", "{file}"},
+		MDHeadingFg:       "#c792ea",
+		MDCodeFg:          "#e5c07b",
 		AddFg:             "green",
 		DelFg:             "red",
 		HunkFg:            "cyan",
@@ -122,6 +126,12 @@ func loadConfig() Config {
 	}
 	if len(cfg.MarkdownViewer) == 0 {
 		cfg.MarkdownViewer = defaultConfig().MarkdownViewer
+	}
+	if cfg.MDHeadingFg == "" {
+		cfg.MDHeadingFg = defaultConfig().MDHeadingFg
+	}
+	if cfg.MDCodeFg == "" {
+		cfg.MDCodeFg = defaultConfig().MDCodeFg
 	}
 	return cfg
 }
