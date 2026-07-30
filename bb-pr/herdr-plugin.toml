@@ -1,0 +1,38 @@
+id = "boooowy.bb-pr"
+name = "Bitbucket PR Viewer"
+version = "0.3.0"
+min_herdr_version = "0.7.0"
+description = "Read-only Bitbucket Cloud PR viewer: list, diffstat, hunk-by-hunk diff, and review comments without leaving herdr."
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["sh", "scripts/build.sh"]
+
+[[actions]]
+id = "open"
+title = "Bitbucket PR: open viewer for current repo"
+command = ["./bin/bb-pr", "action"]
+
+[[actions]]
+id = "open-url"
+title = "Bitbucket PR: open PR from URL"
+command = ["./bin/bb-pr", "action"]
+
+[[panes]]
+id = "viewer"
+title = "Bitbucket PR"
+placement = "tab"
+command = ["./bin/bb-pr", "ui"]
+
+[[panes]]
+id = "difftool"
+# 実際のタブ名は起動時に tab.rename で config の diff_tab_title に置き換わる
+title = "diff"
+placement = "tab"
+command = ["./bin/bb-pr", "difftool-ui"]
+
+[[link_handlers]]
+id = "pr-url"
+title = "Open in PR viewer"
+pattern = "^https://bitbucket\\.org/[^/]+/[^/]+/pull-requests/[0-9]+"
+action = "open-url"
