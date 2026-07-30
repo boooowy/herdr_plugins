@@ -6,7 +6,7 @@ import (
 )
 
 // prStates is the `s` key's filter cycle.
-var prStates = []string{"OPEN", "MERGED", "DECLINED"}
+var prStates = []string{"OPEN", "MERGED", "DECLINED", "SUPERSEDED"}
 
 // listView is the PR list: one selectable row per PR plus a muted meta row
 // with the branch flow underneath.

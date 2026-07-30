@@ -4,7 +4,7 @@ Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧する
 PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）まで、ブラウザを開かずに確認できます。
 
 - plugin ID: `boooowy.bb-pr`
-- version: `0.3.0`
+- version: `0.3.1`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -99,10 +99,14 @@ API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens
 3. **キーバインド** — `~/.config/herdr/config.toml` に例えば:
 
 ```toml
-[[keybindings]]
-key = "ctrl+shift+p"
-action = { type = "plugin_action", plugin = "boooowy.bb-pr", action_id = "open" }
+[[keys.command]]
+key = "cmd+alt+9"                # 配列も可: ["prefix+p", "cmd+alt+9"]
+type = "plugin_action"           # shell/pane/popup では動きません
+command = "boooowy.bb-pr.open"
+description = "Bitbucket PR: open viewer for current repo"
 ```
+
+設定は herdr の再起動、または `herdr server reload-config` で反映されます。
 
 ## キーバインド（ビューア内。`?` で一覧表示）
 
@@ -115,7 +119,7 @@ action = { type = "plugin_action", plugin = "boooowy.bb-pr", action_id = "open" 
 | `v` | 内蔵 diff ビューアで開く（Files タブ。インラインコメント埋め込み表示） |
 | `Tab` / `Shift-Tab` / `1`-`3` | 詳細タブ切替（Overview / Files / Comments） |
 | `e` | 説明文の全文表示（Overview） |
-| `s` | state フィルタ切替（OPEN / MERGED / DECLINED） |
+| `s` | state フィルタ切替（OPEN / MERGED / DECLINED / SUPERSEDED） |
 | `]h` / `[h` | 次 / 前の hunk（内蔵ビューア） |
 | `]f` / `[f`（`→` / `←`） | 次 / 前のファイル（内蔵ビューア） |
 | `za` / `zA` | hunk 折畳 / 全折畳（内蔵ビューア） |
