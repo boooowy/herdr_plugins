@@ -361,7 +361,7 @@ func (v *diffView) handle(a *app, k Key) {
 		}
 		openInDiffTool(a, v.prID, focus)
 	case isKey(k, '?'):
-		a.push(helpView{})
+		a.push(helpView{ctx: "diff"})
 	}
 }
 

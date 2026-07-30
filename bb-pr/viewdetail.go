@@ -395,6 +395,12 @@ func (v *detailView) handle(a *app, k Key) {
 	case k.Kind == KeyShiftTab:
 		v.tab = (v.tab + tabCount - 1) % tabCount
 		v.rebuild(a)
+	case isKey(k, 'l') || k.Kind == KeyRight:
+		v.tab = (v.tab + 1) % tabCount
+		v.rebuild(a)
+	case isKey(k, 'h') || k.Kind == KeyLeft:
+		v.tab = (v.tab + tabCount - 1) % tabCount
+		v.rebuild(a)
 	case isKey(k, '1'):
 		v.tab = tabOverview
 		v.rebuild(a)
@@ -471,15 +477,20 @@ func (v *detailView) handle(a *app, k Key) {
 		if d.pr != nil {
 			copyToClipboard(a, d.pr.WebURL())
 		}
+	case isKey(k, 'b'):
+		d := a.detailFor(v.prID)
+		if d.pr != nil {
+			copyToClipboard(a, d.pr.Source.Branch.Name)
+		}
 	case isKey(k, 'D'):
 		openInDiffTool(a, v.prID, "")
 	case isKey(k, '?'):
-		a.push(helpView{})
+		a.push(helpView{ctx: "detail"})
 	}
 }
 
 func (v *detailView) footer(a *app) string {
-	base := "Tab/1-3:タブ  j/k:移動  "
+	base := "Tab/h/l:タブ  j/k:移動  "
 	if v.tab == tabFiles {
 		if a.cfg.FilesEnter == "builtin" {
 			base += "Enter:diff  "

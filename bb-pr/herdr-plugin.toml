@@ -1,6 +1,6 @@
 id = "boooowy.bb-pr"
 name = "Bitbucket PR Viewer"
-version = "0.4.0"
+version = "0.4.1"
 min_herdr_version = "0.7.0"
 description = "Read-only Bitbucket Cloud PR viewer: list, diffstat, hunk-by-hunk diff, and review comments without leaving herdr."
 platforms = ["macos", "linux"]

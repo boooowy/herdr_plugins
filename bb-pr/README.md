@@ -4,7 +4,7 @@ Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧する
 PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）まで、ブラウザを開かずに確認できます。
 
 - plugin ID: `boooowy.bb-pr`
-- version: `0.4.0`
+- version: `0.4.1`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -110,7 +110,7 @@ description = "Bitbucket PR: open viewer for current repo"
 
 設定は herdr の再起動、または `herdr server reload-config` で反映されます。
 
-## キーバインド（ビューア内。`?` で一覧表示）
+## キーバインド（ビューア内。`?` でその画面で使えるキーを表示）
 
 | キー | 動作 |
 |---|---|
@@ -119,7 +119,7 @@ description = "Bitbucket PR: open viewer for current repo"
 | `g` / `G` | 先頭 / 末尾 |
 | `Enter` | 開く（一覧→詳細→**diff ツール**、Comments のインラインコメント→**コードへジャンプ**）/ 内蔵ビューアでは hunk 折畳トグル |
 | `v` | 内蔵 diff ビューアで開く（Files タブ。インラインコメント埋め込み表示） |
-| `Tab` / `Shift-Tab` / `1`-`3` | 詳細タブ切替（Overview / Files / Comments） |
+| `Tab` / `Shift-Tab` / `1`-`3` / `l` / `h`（`→` / `←`） | 詳細タブ切替（Overview / Files / Comments） |
 | `e` | 説明文の全文表示（Overview） |
 | `s` / `Tab` / `Shift-Tab` | state フィルタ切替（OPEN / MERGED / DECLINED / SUPERSEDED）（一覧） |
 | `]h` / `[h` | 次 / 前の hunk（内蔵ビューア） |
@@ -129,7 +129,8 @@ description = "Bitbucket PR: open viewer for current repo"
 | `D` | PR 全体の diff を diff ツールで開く |
 | `r` | 再読込（キャッシュ破棄） |
 | `o` | ブラウザで開く |
-| `y` | PR URL をクリップボードにコピー |
+| `y` | PR URL をクリップボードにコピー（一覧 / 詳細） |
+| `b` | source branch 名をクリップボードにコピー（一覧 / 詳細） |
 | `q` / `Esc` | 戻る / 終了 |
 
 ## 設定（config.toml、全項目省略可）

@@ -186,8 +186,16 @@ func (v *listView) handle(a *app, k Key) {
 		if r := v.vp.Current(); r != nil && r.Kind == RowPR {
 			openInBrowser(a, a.prs[r.Item.(int)].WebURL())
 		}
+	case isKey(k, 'y'):
+		if r := v.vp.Current(); r != nil && r.Kind == RowPR {
+			copyToClipboard(a, a.prs[r.Item.(int)].WebURL())
+		}
+	case isKey(k, 'b'):
+		if r := v.vp.Current(); r != nil && r.Kind == RowPR {
+			copyToClipboard(a, a.prs[r.Item.(int)].Source.Branch.Name)
+		}
 	case isKey(k, '?'):
-		a.push(helpView{})
+		a.push(helpView{ctx: "list"})
 	}
 	// Cursor within ~5 PRs (2 rows each) of the end: prefetch the next page.
 	if a.prsNext != "" && v.vp.Cursor >= len(v.vp.Rows)-10 {
@@ -208,7 +216,7 @@ func (v *listView) cycleState(a *app, dir int) {
 }
 
 func (v *listView) footer(a *app) string {
-	return "j/k:移動  Enter:開く  Tab/s:state切替  r:再読込  o:ブラウザ  q:終了"
+	return "j/k:移動  Enter:開く  Tab/s:state切替  y:URL  b:ブランチ  r:再読込  o:ブラウザ  q:終了"
 }
 
 // isKey reports whether k is the plain rune r.
