@@ -13,11 +13,7 @@ import (
 // immediate. A missing or corrupt file just means a network-first start.
 
 func prCachePath(ws, repo, state string) string {
-	dir := os.Getenv("HERDR_PLUGIN_STATE_DIR")
-	if dir == "" {
-		dir = os.TempDir()
-	}
-	return filepath.Join(dir, "cache", "prs-"+ws+"__"+repo+"__"+state+".json")
+	return filepath.Join(stateDir(), "cache", "prs-"+ws+"__"+repo+"__"+state+".json")
 }
 
 // loadPRCache returns the cached first page, or nil when absent/unreadable.

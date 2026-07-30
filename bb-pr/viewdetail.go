@@ -128,16 +128,16 @@ func (v *detailView) overviewRows(a *app, d *prDetail) []Row {
 	if desc == "" {
 		rows = append(rows, textRow(Span{" (説明はありません)", styleDim}))
 	} else {
-		lines := wrapText(desc, a.w-3)
+		lines := mdStyledLines(desc, a.w-3, styleNone)
 		truncated := !v.descExpanded && len(lines) > descPreviewLines
 		if truncated {
 			lines = lines[:descPreviewLines]
 		}
-		for _, l := range lines {
-			rows = append(rows, textRow(Span{" " + l, styleNone}))
+		for _, spans := range lines {
+			rows = append(rows, textRow(append([]Span{{" ", styleNone}}, spans...)...))
 		}
 		if truncated {
-			rows = append(rows, textRow(Span{" … (e で全文表示)", styleDim}))
+			rows = append(rows, textRow(Span{" … (e で全文表示 / m でMarkdownビューア)", styleDim}))
 		}
 	}
 
@@ -248,7 +248,7 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	}
 	if inlineTotal > 0 {
 		section(fmt.Sprintf("インラインコメント (%d)", inlineTotal))
-		for _, path := range orderedInlinePaths(d, byFile) {
+		for _, path := range orderedInlinePaths(byFile) {
 			rows = append(rows, textRow(Span{" 📄 ", styleNone}, Span{path, styleTitle}), textRow())
 			for _, t := range byFile[path] {
 				v.inlineThreadFor[t.Root.ID] = t
@@ -259,25 +259,18 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	return rows
 }
 
-// orderedInlinePaths sorts the inline-comment files in diffstat order (the
-// order the Files tab shows), unknown paths last alphabetically.
-func orderedInlinePaths(d *prDetail, byFile map[string][]CommentThread) []string {
-	pos := map[string]int{}
-	for i, st := range d.diffstat {
-		pos[st.Path()] = i
-	}
+// orderedInlinePaths sorts the inline-comment files so the one holding the
+// newest thread comes first (threads within a file are already newest-first
+// via buildThreads).
+func orderedInlinePaths(byFile map[string][]CommentThread) []string {
 	paths := make([]string, 0, len(byFile))
 	for p := range byFile {
 		paths = append(paths, p)
 	}
 	sort.Slice(paths, func(i, j int) bool {
-		pi, iok := pos[paths[i]]
-		pj, jok := pos[paths[j]]
-		if iok != jok {
-			return iok
-		}
-		if iok && jok && pi != pj {
-			return pi < pj
+		ti, tj := byFile[paths[i]][0].Root.CreatedOn, byFile[paths[j]][0].Root.CreatedOn
+		if !ti.Equal(tj) {
+			return ti.After(tj)
 		}
 		return paths[i] < paths[j]
 	})
@@ -482,10 +475,45 @@ func (v *detailView) handle(a *app, k Key) {
 		if d.pr != nil {
 			copyToClipboard(a, d.pr.Source.Branch.Name)
 		}
+	case isKey(k, 'm'):
+		v.openMarkdown(a)
+	case isKey(k, 'C'):
+		// Reply when the cursor is on a Comments-tab thread, otherwise a new
+		// general PR comment.
+		parent := 0
+		if v.tab == tabComments {
+			if r := vp.Current(); r != nil && r.Kind == RowComment {
+				if id, ok := r.Item.(int); ok {
+					parent = id
+				}
+			}
+		}
+		openCommentEditor(a, v.prID, nil, parent)
 	case isKey(k, 'D'):
 		openInDiffTool(a, v.prID, "")
 	case isKey(k, '?'):
 		a.push(helpView{ctx: "detail"})
+	}
+}
+
+// openMarkdown shows the PR description — or, on the Comments tab, the
+// selected thread — in the external markdown viewer popup.
+func (v *detailView) openMarkdown(a *app) {
+	d := a.detailFor(v.prID)
+	if v.tab == tabComments {
+		if r := v.vp[v.tab].Current(); r != nil && r.Kind == RowComment {
+			if id, ok := r.Item.(int); ok {
+				for _, t := range buildThreads(d.comments, nil) {
+					if t.Root.ID == id {
+						openMarkdownView(a, v.prID, threadMarkdown(t))
+						return
+					}
+				}
+			}
+		}
+	}
+	if d.pr != nil {
+		openMarkdownView(a, v.prID, prMarkdown(d.pr))
 	}
 }
 
@@ -504,7 +532,7 @@ func (v *detailView) footer(a *app) string {
 	if v.tab == tabComments {
 		base += "Enter:コードへ  "
 	}
-	return base + "D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
+	return base + "m:MD表示  C:コメント  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
 }
 
 func joinComma(names []string) string {

@@ -34,13 +34,26 @@ func TestBuildThreadsNesting(t *testing.T) {
 	if len(threads) != 2 {
 		t.Fatalf("got %d threads, want 2", len(threads))
 	}
-	// Sorted by root creation: id 10 first.
-	if threads[0].Root.ID != 10 || threads[1].Root.ID != 1 {
+	// Newest root first: id 1 (base) before id 10 (base-1h).
+	if threads[0].Root.ID != 1 || threads[1].Root.ID != 10 {
 		t.Errorf("thread order: %d, %d", threads[0].Root.ID, threads[1].Root.ID)
 	}
 	// The 3-level chain flattens under root 1 in chronological order.
-	if len(threads[1].Replies) != 2 || threads[1].Replies[0].ID != 2 || threads[1].Replies[1].ID != 3 {
-		t.Errorf("replies: %+v", threads[1].Replies)
+	if len(threads[0].Replies) != 2 || threads[0].Replies[0].ID != 2 || threads[0].Replies[1].ID != 3 {
+		t.Errorf("replies: %+v", threads[0].Replies)
+	}
+}
+
+func TestOrderedInlinePathsNewestFirst(t *testing.T) {
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	comments := []Comment{
+		mkComment(1, 0, "old.py", nil, iptr(1), false, base),
+		mkComment(2, 0, "new.py", nil, iptr(2), false, base.Add(2*time.Hour)),
+		mkComment(3, 0, "mid.py", nil, iptr(3), false, base.Add(time.Hour)),
+	}
+	paths := orderedInlinePaths(inlineThreadsByFile(comments))
+	if len(paths) != 3 || paths[0] != "new.py" || paths[1] != "mid.py" || paths[2] != "old.py" {
+		t.Errorf("paths = %v", paths)
 	}
 }
 

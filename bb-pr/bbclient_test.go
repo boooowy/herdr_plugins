@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -148,6 +149,66 @@ func TestRetryOnTransportError(t *testing.T) {
 	}
 	if pr.Title != "ok" || calls.Load() != 2 {
 		t.Errorf("pr=%+v calls=%d", pr, calls.Load())
+	}
+}
+
+func TestPostComment(t *testing.T) {
+	var got map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/37/comments", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s", r.Method)
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("content-type = %s", ct)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprint(w, `{"id":999,"content":{"raw":"ok"}}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	to := 496
+	c, err := testClient(srv).postComment("ws", "repo", 37, "テスト本文",
+		&InlineAnchor{Path: "a.py", To: &to}, 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ID != 999 {
+		t.Errorf("returned comment id = %d", c.ID)
+	}
+	if got["content"].(map[string]any)["raw"] != "テスト本文" {
+		t.Errorf("content: %v", got["content"])
+	}
+	inline := got["inline"].(map[string]any)
+	if inline["path"] != "a.py" || inline["to"] != float64(496) {
+		t.Errorf("inline: %v", inline)
+	}
+	if got["parent"].(map[string]any)["id"] != float64(123) {
+		t.Errorf("parent: %v", got["parent"])
+	}
+}
+
+func TestPostCommentGeneralOmitsAnchor(t *testing.T) {
+	var got map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/37/comments", func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&got)
+		fmt.Fprint(w, `{"id":1}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	if _, err := testClient(srv).postComment("ws", "repo", 37, "hi", nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["inline"]; ok {
+		t.Error("general comment must not send inline")
+	}
+	if _, ok := got["parent"]; ok {
+		t.Error("root comment must not send parent")
 	}
 }
 

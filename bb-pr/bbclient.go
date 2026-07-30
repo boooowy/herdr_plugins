@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -102,6 +103,60 @@ func (c *bbClient) getJSON(rawURL string, out any) error {
 		return fmt.Errorf("decode %s: %w", rawURL, err)
 	}
 	return nil
+}
+
+// postJSON performs one authenticated POST. Unlike do(), it never retries —
+// a retried POST could double-post a comment.
+func (c *bbClient) postJSON(rawURL string, payload, out any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, rawURL, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(c.email, c.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return &httpError{Status: resp.StatusCode, URL: rawURL, Body: strings.TrimSpace(string(body))}
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
+	}
+	return nil
+}
+
+// postComment creates a PR comment: general (inline == nil), inline
+// (path + to/from), or a reply (parentID > 0 — the server copies the
+// parent's anchor, so replies pass inline == nil).
+func (c *bbClient) postComment(ws, repo string, id int, body string, inline *InlineAnchor, parentID int) (*Comment, error) {
+	payload := map[string]any{"content": map[string]any{"raw": body}}
+	if inline != nil {
+		in := map[string]any{"path": inline.Path}
+		if inline.To != nil {
+			in["to"] = *inline.To
+		}
+		if inline.From != nil {
+			in["from"] = *inline.From
+		}
+		payload["inline"] = in
+	}
+	if parentID > 0 {
+		payload["parent"] = map[string]any{"id": parentID}
+	}
+	var out Comment
+	u := c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/comments", id))
+	if err := c.postJSON(u, payload, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // getText fetches one GET response as plain text (the raw diff).

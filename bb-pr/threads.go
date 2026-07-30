@@ -56,14 +56,21 @@ func threadRows(t CommentThread, width int, boxed bool, now time.Time, anchorLab
 	}
 	rows = append(rows, row(RowComment, t.Root.ID, true, header...))
 
+	// prefixSpans is the per-row lead-in (box border + indent) that markdown
+	// body spans get appended to.
+	prefixSpans := func(indent string) []Span {
+		if boxed {
+			return []Span{{" │ ", styleCommentBorder}, {indent, styleNone}}
+		}
+		return []Span{{"   " + indent, styleNone}}
+	}
 	appendBody := func(c Comment, indent string) {
-		body := c.Content.Raw
 		if c.Deleted {
 			rows = append(rows, Row{Kind: RowComment, Spans: prefix(indent+"(deleted comment)", styleDim)})
 			return
 		}
-		for _, l := range wrapText(body, bodyW-displayWidth(indent)) {
-			rows = append(rows, Row{Kind: RowComment, Spans: prefix(indent+l, styleComment)})
+		for _, spans := range mdStyledLines(c.Content.Raw, bodyW-displayWidth(indent), styleComment) {
+			rows = append(rows, Row{Kind: RowComment, Spans: append(prefixSpans(indent), spans...)})
 		}
 	}
 	appendBody(t.Root, "")

@@ -13,7 +13,7 @@ import (
 	"os"
 )
 
-const version = "0.5.0"
+const version = "0.6.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -26,6 +26,10 @@ func main() {
 		runUI()
 	case "difftool-ui":
 		runDiffToolUI()
+	case "mdview-ui":
+		runMDViewUI()
+	case "comment-ui":
+		runCommentUI()
 	case "dump": // dev helper: print raw API responses to stdout
 		runDump(os.Args[2:])
 	case "version":
@@ -36,7 +40,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bb-pr <action|ui|difftool-ui|dump|version>")
+	fmt.Fprintln(os.Stderr, "usage: bb-pr <action|ui|difftool-ui|mdview-ui|comment-ui|dump|version>")
 	os.Exit(2)
 }
 

@@ -1,10 +1,12 @@
 # bb-pr — Bitbucket PR Viewer
 
-Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧する読み取り専用ビューアです。
-PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）まで、ブラウザを開かずに確認できます。
+Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧・コメントするビューアです。
+PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）
+の閲覧に加え、`C` キーでコード行へのインラインコメント・返信・PRコメントを投稿できます
+（本文はいつものエディタが popup で開きます）。approve / merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bb-pr`
-- version: `0.5.0`
+- version: `0.6.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -84,6 +86,8 @@ export ATLASSIAN_API_TOKEN="<APIトークン>"
 
 API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens> で作成します
 （App Password は 2026年6月に廃止済みのため使えません）。
+**コメント投稿（`C`）を使う場合は、トークンに pullrequest への write スコープが必要です**
+（閲覧だけなら read で十分）。
 
 環境変数の代わりに `~/.config/herdr/plugins/config/boooowy.bb-pr/config.toml` に
 `email` / `api_token` を書くこともできます（そちらが優先）。
@@ -125,7 +129,10 @@ description = "Bitbucket PR: open viewer for current repo"
 | `]h` / `[h` | 次 / 前の hunk（内蔵ビューア） |
 | `]f` / `[f`（`→` / `←`） | 次 / 前のファイル（内蔵ビューア） |
 | `za` / `zA` | hunk 折畳 / 全折畳（内蔵ビューア） |
+| `w` | 長い行の折返し切替（内蔵ビューア） |
 | `c` | インラインコメント表示切替（内蔵ビューア） |
+| `C` | **コメント投稿** — diff 行:インラインコメント / スレッド上:返信 / それ以外:PRコメント。エディタが popup で開き、保存して閉じると投稿（空なら中止）。反映は `r` |
+| `m` | 説明文 / 選択スレッドを **Markdown ビューア**（既定 glow）の popup で表示 |
 | `D` | PR 全体の diff を diff ツールで開く |
 | `r` | 再読込（キャッシュ破棄） |
 | `o` | ブラウザで開く |
@@ -163,6 +170,11 @@ difftool_width = "95%"        # popup のみ有効（セル数 or "95%"）
 difftool_height = "95%"
 diff_tab_title = "PR #{id}"   # difftool_placement = "tab" のタブ名。{id} {title} {repo}
 
+# m キーの Markdown ビューア（{file} = mdファイル。無ければ stdin に流す）
+markdown_viewer = ["glow", "-p", "{file}"]
+# C キーのコメント編集エディタ（未設定なら $EDITOR、それも無ければ nvim）
+comment_editor = []           # 例: ["nvim", "+startinsert", "{file}"]
+
 # 色（色名 / 0-255 / #rrggbb）
 add_fg = "green"
 del_fg = "red"
@@ -172,9 +184,9 @@ comment_border_fg = "#8be9fd"
 outdated_fg = "yellow"
 ```
 
-## 制限事項（v1）
+## 制限事項
 
-- 読み取り専用です。コメント投稿・approve・merge は行えません（`o` でブラウザへ）。
+- approve・merge は行えません（`o` でブラウザへ）。コメント投稿後の画面反映は `r` で再読込してください。
 - PR 一覧は50件ずつのオンデマンド取得です。カーソルが末尾付近に来ると次の50件を自動で読み込みます
   （ヘッダの「N件+」の `+` が未取得分の印）。
 - 起動時は前回取得した一覧を即表示し、裏で最新に更新します

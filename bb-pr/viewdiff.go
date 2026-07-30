@@ -18,6 +18,7 @@ type diffView struct {
 	vp      Viewport
 	folded  map[int]bool
 	showCmt bool
+	wrap    bool // long diff lines: wrapped vs clipped (w key)
 	pending rune // first key of a two-key sequence (]h, [h, ]f, [f, za, zA)
 
 	// pendingJump is a comment root ID to scroll to once its row exists
@@ -167,7 +168,7 @@ func (v *diffView) rebuild(a *app) {
 			continue
 		}
 		for li, l := range h.Lines {
-			rows = append(rows, diffLineRow(l, numW, a.w))
+			rows = append(rows, diffLineRows(l, numW, a.w, v.wrap)...)
 			if v.showCmt {
 				for _, t := range anchored[[2]int{hi, li}] {
 					rows = append(rows, threadRows(t, a.w, true, now, "")...)
@@ -188,9 +189,11 @@ func (v *diffView) rebuild(a *app) {
 	v.vp.Reset(rows)
 }
 
-// diffLineRow renders one diff body line: old/new line numbers, the marker,
-// and the content in the line-kind color.
-func diffLineRow(l DiffLine, numW, width int) Row {
+// diffLineRows renders one diff body line: old/new line numbers, the marker,
+// and the content in the line-kind color. The row's Item carries the
+// DiffLine so `C` can anchor an inline comment to it. With wrap, overlong
+// content continues on gutter-indented, non-selectable rows.
+func diffLineRows(l DiffLine, numW, width int, wrap bool) []Row {
 	oldNo, newNo := "", ""
 	if l.OldNo > 0 {
 		oldNo = fmt.Sprintf("%*d", numW, l.OldNo)
@@ -211,11 +214,25 @@ func diffLineRow(l DiffLine, numW, width int) Row {
 	case LineNoNewline:
 		marker, style = `\`, styleDim
 	}
-	return row(RowDiffLine, nil, true,
-		Span{oldNo + " " + newNo + " ", styleDim},
-		Span{marker + " ", style},
-		Span{strings.ReplaceAll(l.Text, "\t", "    "), style},
-	)
+	text := strings.ReplaceAll(l.Text, "\t", "    ")
+	gutterW := numW*2 + 4 // "OLD NEW " + "M "
+	first := func(content string) Row {
+		return row(RowDiffLine, l, true,
+			Span{oldNo + " " + newNo + " ", styleDim},
+			Span{marker + " ", style},
+			Span{content, style},
+		)
+	}
+	if !wrap || displayWidth(text) <= width-gutterW {
+		return []Row{first(text)}
+	}
+	chunks := wrapText(text, max(width-gutterW, 10))
+	rows := []Row{first(chunks[0])}
+	pad := strings.Repeat(" ", gutterW)
+	for _, c := range chunks[1:] {
+		rows = append(rows, Row{Kind: RowDiffLine, Spans: []Span{{pad, styleNone}, {c, style}}})
+	}
+	return rows
 }
 
 func hunkCommentCount(anchored map[[2]int][]CommentThread, hi int) int {
@@ -348,6 +365,11 @@ func (v *diffView) handle(a *app, k Key) {
 	case isKey(k, 'c'):
 		v.showCmt = !v.showCmt
 		v.rebuild(a)
+	case isKey(k, 'w'):
+		v.wrap = !v.wrap
+		v.rebuild(a)
+	case isKey(k, 'C'):
+		v.composeComment(a)
 	case isKey(k, 'o'):
 		d := a.detailFor(v.prID)
 		if d.pr != nil {
@@ -362,6 +384,45 @@ func (v *diffView) handle(a *app, k Key) {
 		openInDiffTool(a, v.prID, focus)
 	case isKey(k, '?'):
 		a.push(helpView{ctx: "diff"})
+	}
+}
+
+// composeComment opens the comment editor for the cursor row: an inline
+// comment on a diff line, or a reply on a comment thread.
+func (v *diffView) composeComment(a *app) {
+	r := v.vp.Current()
+	if r == nil {
+		return
+	}
+	switch r.Kind {
+	case RowComment:
+		if id, ok := r.Item.(int); ok {
+			openCommentEditor(a, v.prID, nil, id)
+		}
+	case RowDiffLine:
+		l, ok := r.Item.(DiffLine)
+		if !ok {
+			return
+		}
+		_, st, _ := v.fileDiff(a)
+		if st == nil {
+			return
+		}
+		in := &InlineAnchor{Path: st.Path()}
+		switch {
+		case l.Kind != LineDel && l.NewNo > 0:
+			n := l.NewNo
+			in.To = &n
+		case l.OldNo > 0:
+			n := l.OldNo
+			in.From = &n
+		default:
+			a.status = "この行にはコメントできません"
+			return
+		}
+		openCommentEditor(a, v.prID, in, 0)
+	default:
+		a.status = "diff 行かコメントの上で C を押してください"
 	}
 }
 
@@ -424,5 +485,5 @@ func (v *diffView) snapToHunk(hi int) {
 }
 
 func (v *diffView) footer(a *app) string {
-	return "j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za/zA:折畳  c:💬  D:diffツール  o:ブラウザ  q:戻る"
+	return "j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za:折畳  w:折返し  c:💬  C:コメント  D:diffツール  q:戻る"
 }

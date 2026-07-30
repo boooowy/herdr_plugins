@@ -2,11 +2,21 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/mattn/go-runewidth"
 )
+
+// stateDir is the plugin's writable state directory (patches, drafts,
+// caches). herdr sets it for every plugin process.
+func stateDir() string {
+	if dir := os.Getenv("HERDR_PLUGIN_STATE_DIR"); dir != "" {
+		return dir
+	}
+	return os.TempDir()
+}
 
 // relTime renders a compact relative timestamp ("3分前", "2時間前", "5日前").
 func relTime(t time.Time, now time.Time) string {

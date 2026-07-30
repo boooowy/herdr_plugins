@@ -60,8 +60,9 @@ func buildThreads(comments []Comment, keep func(*Comment) bool) []CommentThread 
 		})
 		out = append(out, *t)
 	}
+	// Newest thread first (replies inside a thread stay chronological).
 	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].Root.CreatedOn.Before(out[j].Root.CreatedOn)
+		return out[i].Root.CreatedOn.After(out[j].Root.CreatedOn)
 	})
 	return out
 }

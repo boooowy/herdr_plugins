@@ -34,6 +34,8 @@ type Config struct {
 	DifftoolPlacement string   `toml:"difftool_placement"` // popup | overlay | tab | split
 	DifftoolWidth     string   `toml:"difftool_width"`     // popup only: cells or "95%"
 	DifftoolHeight    string   `toml:"difftool_height"`
+	MarkdownViewer    []string `toml:"markdown_viewer"` // m key; {file} = md file
+	CommentEditor     []string `toml:"comment_editor"`  // C key; empty = $EDITOR → nvim
 
 	AddFg           string `toml:"add_fg"`
 	DelFg           string `toml:"del_fg"`
@@ -61,6 +63,7 @@ func defaultConfig() Config {
 		DifftoolPlacement: "popup",
 		DifftoolWidth:     "95%",
 		DifftoolHeight:    "95%",
+		MarkdownViewer:    []string{"glow", "-p", "{file}"},
 		AddFg:             "green",
 		DelFg:             "red",
 		HunkFg:            "cyan",
@@ -116,6 +119,9 @@ func loadConfig() Config {
 	}
 	if cfg.ListTabTitle == "" {
 		cfg.ListTabTitle = defaultConfig().ListTabTitle
+	}
+	if len(cfg.MarkdownViewer) == 0 {
+		cfg.MarkdownViewer = defaultConfig().MarkdownViewer
 	}
 	return cfg
 }

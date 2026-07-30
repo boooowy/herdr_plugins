@@ -45,11 +45,7 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		a.status = "diff を読み込み中 — 完了後に diff ツールを開きます"
 		return
 	}
-	dir := os.Getenv("HERDR_PLUGIN_STATE_DIR")
-	if dir == "" {
-		dir = os.TempDir()
-	}
-	path := filepath.Join(dir, fmt.Sprintf("pr-%d.patch", prID))
+	path := filepath.Join(stateDir(), fmt.Sprintf("pr-%d.patch", prID))
 	if err := os.WriteFile(path, []byte(reorderPatch(d.diffText, focusPath)), 0o600); err != nil {
 		a.status = "patch ファイルを書けません: " + err.Error()
 		return
@@ -160,19 +156,26 @@ func reorderPatch(text, focusPath string) string {
 	return text
 }
 
+// expandArgv replaces placeholder with value across argv; found reports
+// whether any element contained it (callers pipe the file to stdin or
+// append it as an argument when absent).
+func expandArgv(argv []string, placeholder, value string) (out []string, found bool) {
+	out = make([]string, len(argv))
+	for i, a := range argv {
+		if strings.Contains(a, placeholder) {
+			found = true
+		}
+		out[i] = strings.ReplaceAll(a, placeholder, value)
+	}
+	return out, found
+}
+
 // diffToolArgv expands the configured argv: {patch} is replaced with the
 // patch path; useStdin reports that no placeholder was present, so the
 // caller should pipe the patch file to stdin instead.
 func diffToolArgv(argv []string, patchPath string) (out []string, useStdin bool) {
-	out = make([]string, len(argv))
-	useStdin = true
-	for i, a := range argv {
-		if strings.Contains(a, "{patch}") {
-			useStdin = false
-		}
-		out[i] = strings.ReplaceAll(a, "{patch}", patchPath)
-	}
-	return out, useStdin
+	out, found := expandArgv(argv, "{patch}", patchPath)
+	return out, !found
 }
 
 // runDiffToolUI is the difftool pane's entrypoint: run the configured tool
@@ -221,24 +224,31 @@ func runDiffToolUI() {
 // showDiffToolInstallHelp renders setup instructions when the configured
 // tool binary is missing, then waits for a key.
 func showDiffToolInstallHelp(cfg Config, missing string) {
-	w, h := termSize()
-	out := bufio.NewWriter(os.Stdout)
-	s := NewScreen(w, h)
-	lines := []string{
-		fmt.Sprintf("diff ツール %q が見つかりません。", missing),
-		"",
+	showToolInstallHelp(cfg, missing, []string{
 		"デフォルトの hunk を使う場合:",
 		"  brew install hunk        # または: npm i -g hunkdiff",
 		"",
 		"別のツールを使う場合は config.toml で指定できます（{patch} = patchファイル）:",
 		`  diff_tool = ["delta", "{patch}"]`,
 		`  diff_tool = ["nvim", "-c", "silent! e {patch}"]`,
-	}
-	s.WriteString(1, 0, "bb-pr — diff ツールが必要です", styleTitle, w)
+	})
+}
+
+// showToolInstallHelp is the shared "external tool is missing" screen.
+func showToolInstallHelp(cfg Config, missing string, lines []string) {
+	w, h := termSize()
+	s := NewScreen(w, h)
+	s.WriteString(1, 0, fmt.Sprintf("bb-pr — ツール %q が見つかりません", missing), styleTitle, w)
 	for i, l := range lines {
 		s.WriteString(1, i+2, l, styleNone, w)
 	}
 	s.WriteString(1, h-1, " 任意のキーで終了", styleDim, w)
+	paintAndWaitKey(s, cfg)
+}
+
+// paintAndWaitKey flushes a full-screen message and blocks for one key.
+func paintAndWaitKey(s *Screen, cfg Config) {
+	out := bufio.NewWriter(os.Stdout)
 	s.Flush(out, sgrTable(cfg))
 	out.Flush()
 	if old, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
