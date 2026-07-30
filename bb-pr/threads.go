@@ -5,92 +5,73 @@ import (
 	"time"
 )
 
-// threadRows renders one comment thread as viewport rows. boxed draws the
-// ┌/│/└ frame used inside the diff view; the Comments tab renders unframed.
-// The root header row is selectable so the cursor can walk threads.
-// anchorLabel ("L486–496" etc.) prefixes the header when non-empty — the
-// Comments tab uses it; the diff view passes "" (the code line is visible).
-func threadRows(t CommentThread, width int, boxed bool, now time.Time, anchorLabel string) []Row {
+// threadRows renders one comment thread as viewport rows: no border
+// characters — each comment area reads as a block via the comment
+// background (onCmtBg), replies are indented under a ↳ header, and a plain
+// blank row separates threads. The root header row is selectable so the
+// cursor can walk threads. anchorLabel ("L486–496" etc.) prefixes the
+// header when non-empty.
+func threadRows(t CommentThread, width int, now time.Time, anchorLabel string) []Row {
 	var rows []Row
-	bodyW := width - 4
-	if boxed {
-		bodyW = width - 6
-	}
-	if bodyW < 10 {
-		bodyW = 10
+	bg := func(spans []Span, kind RowKind, item any, selectable bool) {
+		rows = append(rows, Row{Kind: kind, Item: item, Selectable: selectable,
+			Spans: padBgRow(spans, width)})
 	}
 
-	prefix := func(s string, st StyleID) []Span {
-		if boxed {
-			return []Span{{" │ ", styleCommentBorder}, {s, st}}
-		}
-		return []Span{{"   ", styleNone}, {s, st}}
-	}
-
-	// Header: ┌─💬 author (time) [outdated] ────
-	header := []Span{}
-	if boxed {
-		header = append(header, Span{" ┌─", styleCommentBorder})
-	} else {
-		header = append(header, Span{" ", styleNone})
-	}
+	// Root header: 💬 author (time) [anchor] [outdated]
+	header := []Span{{" ", onCmtBg(styleNone)}}
 	if anchorLabel != "" {
-		header = append(header, Span{anchorLabel + " ", styleMeta})
+		header = append(header, Span{anchorLabel + " ", onCmtBg(styleMeta)})
 	}
 	header = append(header,
-		Span{"💬 ", styleNone},
-		Span{t.Root.User.Name(), styleAuthor},
-		Span{" (" + relTime(t.Root.CreatedOn, now) + ")", styleDim},
+		Span{"💬 ", onCmtBg(styleNone)},
+		Span{t.Root.User.Name(), onCmtBg(styleAuthor)},
+		Span{" (" + relTime(t.Root.CreatedOn, now) + ")", onCmtBg(styleDim)},
 	)
 	if t.Root.Inline != nil && t.Root.Inline.Outdated {
-		header = append(header, Span{" [outdated]", styleOutdated})
+		header = append(header, Span{" [outdated]", onCmtBg(styleOutdated)})
 	}
-	if boxed {
-		used := 0
-		for _, sp := range header {
-			used += displayWidth(sp.Text)
-		}
-		if pad := width - used - 2; pad > 0 {
-			header = append(header, Span{" " + strings.Repeat("─", pad), styleCommentBorder})
-		}
-	}
-	rows = append(rows, row(RowComment, t.Root.ID, true, header...))
+	bg(header, RowComment, t.Root.ID, true)
 
-	// prefixSpans is the per-row lead-in (box border + indent) that markdown
-	// body spans get appended to.
-	prefixSpans := func(indent string) []Span {
-		if boxed {
-			return []Span{{" │ ", styleCommentBorder}, {indent, styleNone}}
-		}
-		return []Span{{"   " + indent, styleNone}}
-	}
 	appendBody := func(c Comment, indent string) {
 		if c.Deleted {
-			rows = append(rows, Row{Kind: RowComment, Spans: prefix(indent+"(deleted comment)", styleDim)})
+			bg([]Span{{indent + "(deleted comment)", onCmtBg(styleDim)}}, RowComment, nil, false)
 			return
 		}
-		for _, spans := range mdStyledLines(c.Content.Raw, bodyW-displayWidth(indent), styleComment) {
-			rows = append(rows, Row{Kind: RowComment, Spans: append(prefixSpans(indent), spans...)})
+		w := width - displayWidth(indent) - 1
+		for _, spans := range mdStyledLines(c.Content.Raw, w, styleComment) {
+			row := []Span{{indent, onCmtBg(styleNone)}}
+			for _, sp := range spans {
+				row = append(row, Span{sp.Text, onCmtBg(sp.Style)})
+			}
+			bg(row, RowComment, nil, false)
 		}
 	}
-	appendBody(t.Root, "")
+	appendBody(t.Root, "   ")
 
 	for _, r := range t.Replies {
-		head := prefix(" └ ", styleDim)
-		head = append(head,
-			Span{r.User.Name(), styleAuthor},
-			Span{" (" + relTime(r.CreatedOn, now) + ")", styleDim},
-		)
-		rows = append(rows, Row{Kind: RowComment, Spans: head})
-		appendBody(r, "   ")
+		head := []Span{
+			{"   ↳ ", onCmtBg(styleDim)},
+			{r.User.Name(), onCmtBg(styleAuthor)},
+			{" (" + relTime(r.CreatedOn, now) + ")", onCmtBg(styleDim)},
+		}
+		bg(head, RowComment, nil, false)
+		appendBody(r, "     ")
 	}
 
-	if boxed {
-		rows = append(rows, Row{Kind: RowComment, Spans: []Span{
-			{" └" + strings.Repeat("─", max(0, width-4)), styleCommentBorder},
-		}})
-	} else {
-		rows = append(rows, Row{Kind: RowComment})
-	}
+	rows = append(rows, Row{Kind: RowComment}) // plain gap between threads
 	return rows
+}
+
+// padBgRow extends a comment-area row to the full width so the background
+// forms a clean rectangle.
+func padBgRow(spans []Span, width int) []Span {
+	used := 0
+	for _, sp := range spans {
+		used += displayWidth(sp.Text)
+	}
+	if pad := width - used; pad > 0 {
+		spans = append(spans, Span{strings.Repeat(" ", pad), onCmtBg(styleNone)})
+	}
+	return spans
 }

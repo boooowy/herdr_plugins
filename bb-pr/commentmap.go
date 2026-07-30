@@ -55,6 +55,15 @@ func buildThreads(comments []Comment, keep func(*Comment) bool) []CommentThread 
 	out := make([]CommentThread, 0, len(order))
 	for _, id := range order {
 		t := threads[id]
+		// Fully-deleted threads are tombstone noise; a deleted root with
+		// live replies stays for context.
+		alive := !t.Root.Deleted
+		for _, r := range t.Replies {
+			alive = alive || !r.Deleted
+		}
+		if !alive {
+			continue
+		}
 		sort.SliceStable(t.Replies, func(i, j int) bool {
 			return t.Replies[i].CreatedOn.Before(t.Replies[j].CreatedOn)
 		})

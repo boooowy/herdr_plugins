@@ -137,7 +137,7 @@ func (v *detailView) overviewRows(a *app, d *prDetail) []Row {
 			rows = append(rows, textRow(append([]Span{{" ", styleNone}}, spans...)...))
 		}
 		if truncated {
-			rows = append(rows, textRow(Span{" … (e で全文表示 / m でMarkdownビューア)", styleDim}))
+			rows = append(rows, textRow(Span{" … (e で全文表示)", styleDim}))
 		}
 	}
 
@@ -243,7 +243,7 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	if len(general) > 0 {
 		section(fmt.Sprintf("PR コメント (%d)", len(general)))
 		for _, t := range general {
-			rows = append(rows, threadRows(t, a.w, false, now, "")...)
+			rows = append(rows, threadRows(t, a.w, now, "")...)
 		}
 	}
 	if inlineTotal > 0 {
@@ -252,7 +252,7 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 			rows = append(rows, textRow(Span{" 📄 ", styleNone}, Span{path, styleTitle}), textRow())
 			for _, t := range byFile[path] {
 				v.inlineThreadFor[t.Root.ID] = t
-				rows = append(rows, threadRows(t, a.w, false, now, t.lineLabel())...)
+				rows = append(rows, threadRows(t, a.w, now, t.lineLabel())...)
 			}
 		}
 	}
@@ -475,8 +475,6 @@ func (v *detailView) handle(a *app, k Key) {
 		if d.pr != nil {
 			copyToClipboard(a, d.pr.Source.Branch.Name)
 		}
-	case isKey(k, 'm'):
-		v.openMarkdown(a)
 	case isKey(k, 'C'):
 		// Reply when the cursor is on a Comments-tab thread, otherwise a new
 		// general PR comment.
@@ -496,27 +494,6 @@ func (v *detailView) handle(a *app, k Key) {
 	}
 }
 
-// openMarkdown shows the PR description — or, on the Comments tab, the
-// selected thread — in the external markdown viewer popup.
-func (v *detailView) openMarkdown(a *app) {
-	d := a.detailFor(v.prID)
-	if v.tab == tabComments {
-		if r := v.vp[v.tab].Current(); r != nil && r.Kind == RowComment {
-			if id, ok := r.Item.(int); ok {
-				for _, t := range buildThreads(d.comments, nil) {
-					if t.Root.ID == id {
-						openMarkdownView(a, v.prID, threadMarkdown(t))
-						return
-					}
-				}
-			}
-		}
-	}
-	if d.pr != nil {
-		openMarkdownView(a, v.prID, prMarkdown(d.pr))
-	}
-}
-
 func (v *detailView) footer(a *app) string {
 	base := "Tab/h/l:タブ  j/k:移動  "
 	if v.tab == tabFiles {
@@ -532,7 +509,7 @@ func (v *detailView) footer(a *app) string {
 	if v.tab == tabComments {
 		base += "Enter:コードへ  "
 	}
-	return base + "m:MD表示  C:コメント  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
+	return base + "C:コメント  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
 }
 
 func joinComma(names []string) string {

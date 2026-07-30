@@ -34,17 +34,17 @@ type Config struct {
 	DifftoolPlacement string   `toml:"difftool_placement"` // popup | overlay | tab | split
 	DifftoolWidth     string   `toml:"difftool_width"`     // popup only: cells or "95%"
 	DifftoolHeight    string   `toml:"difftool_height"`
-	MarkdownViewer    []string `toml:"markdown_viewer"` // m key; {file} = md file
-	CommentEditor     []string `toml:"comment_editor"`  // C key; empty = $EDITOR → nvim
+	CommentEditor     []string `toml:"comment_editor"` // C key; empty = $EDITOR → nvim
 
-	MDHeadingFg     string `toml:"md_heading_fg"` // in-tab markdown headings
-	MDCodeFg        string `toml:"md_code_fg"`    // in-tab markdown code
-	AddFg           string `toml:"add_fg"`
-	DelFg           string `toml:"del_fg"`
-	HunkFg          string `toml:"hunk_fg"`
-	CommentFg       string `toml:"comment_fg"`
-	CommentBorderFg string `toml:"comment_border_fg"`
-	OutdatedFg      string `toml:"outdated_fg"`
+	MDHeadingFg string `toml:"md_heading_fg"` // in-tab markdown headings
+	MDCodeFg    string `toml:"md_code_fg"`    // in-tab markdown code
+	MDCodeBg    string `toml:"md_code_bg"`    // code-block / inline-code background
+	CommentBg   string `toml:"comment_bg"`    // comment-area background
+	AddFg       string `toml:"add_fg"`
+	DelFg       string `toml:"del_fg"`
+	HunkFg      string `toml:"hunk_fg"`
+	CommentFg   string `toml:"comment_fg"`
+	OutdatedFg  string `toml:"outdated_fg"`
 
 	// loadErr carries a config parse problem so the UI can surface it once
 	// instead of dying.
@@ -65,14 +65,14 @@ func defaultConfig() Config {
 		DifftoolPlacement: "popup",
 		DifftoolWidth:     "95%",
 		DifftoolHeight:    "95%",
-		MarkdownViewer:    []string{"glow", "-p", "{file}"},
 		MDHeadingFg:       "#c792ea",
 		MDCodeFg:          "#e5c07b",
+		MDCodeBg:          "#161821",
+		CommentBg:         "#20222e",
 		AddFg:             "green",
 		DelFg:             "red",
 		HunkFg:            "cyan",
 		CommentFg:         "white",
-		CommentBorderFg:   "#8be9fd",
 		OutdatedFg:        "yellow",
 	}
 }
@@ -124,14 +124,17 @@ func loadConfig() Config {
 	if cfg.ListTabTitle == "" {
 		cfg.ListTabTitle = defaultConfig().ListTabTitle
 	}
-	if len(cfg.MarkdownViewer) == 0 {
-		cfg.MarkdownViewer = defaultConfig().MarkdownViewer
-	}
 	if cfg.MDHeadingFg == "" {
 		cfg.MDHeadingFg = defaultConfig().MDHeadingFg
 	}
 	if cfg.MDCodeFg == "" {
 		cfg.MDCodeFg = defaultConfig().MDCodeFg
+	}
+	if cfg.MDCodeBg == "" {
+		cfg.MDCodeBg = defaultConfig().MDCodeBg
+	}
+	if cfg.CommentBg == "" {
+		cfg.CommentBg = defaultConfig().CommentBg
 	}
 	return cfg
 }

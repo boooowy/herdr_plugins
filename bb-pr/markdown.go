@@ -1,28 +1,20 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/mattn/go-runewidth"
 )
 
-// Markdown support, two-tier: mdStyledLines gives descriptions and comments
-// lightweight in-TUI styling, and the `m` key hands the raw markdown to the
-// user's own renderer (config `markdown_viewer`, glow by default) in a herdr
-// popup — the same pattern as the external diff tool.
+// The in-tab markdown renderer for descriptions and comment bodies. Block
+// elements (headings, lists, quotes, fenced code with syntax highlighting,
+// rules, tables) and inline ones (code, bold, links) are interpreted;
+// anything ambiguous passes through verbatim.
 
-const envMDFile = "BBPR_MD_FILE"
-
-// mdStyledLines renders markdown source as styled, wrapped display lines —
-// the in-tab renderer for descriptions and comment bodies. Block elements
-// (headings, lists, quotes, fences, rules, tables) and inline ones (code,
-// bold, links) are interpreted; anything ambiguous passes through verbatim.
-// The `m` popup covers full-fidelity rendering.
+// mdStyledLines renders markdown source as styled, wrapped display lines.
 func mdStyledLines(text string, width int, base StyleID) [][]Span {
 	if width < 10 {
 		width = 10
@@ -44,24 +36,40 @@ func mdStyledLines(text string, width int, base StyleID) [][]Span {
 			out = append(out, append([]Span{lead}, ws...))
 		}
 	}
+	fenceBar := func(lang string) {
+		bar := "── "
+		if lang != "" {
+			bar += lang + " "
+		}
+		if pad := width - displayWidth(bar); pad > 0 {
+			bar += strings.Repeat("─", pad)
+		}
+		emit([]Span{{bar, styleDim}})
+	}
 
 	inFence := false
+	fenceLang := ""
+	var fenceBuf []string
+	closeFence := func() {
+		out = append(out, highlightCode(fenceLang, strings.Join(fenceBuf, "\n"), width)...)
+		fenceBuf, inFence = nil, false
+	}
+
 	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		trimmed := strings.TrimLeft(line, " \t")
 		indent := line[:len(line)-len(trimmed)]
 		switch {
 		case strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~"):
-			bar := "── "
-			if lang := strings.Trim(trimmed, "`~ "); lang != "" && !inFence {
-				bar += lang + " "
+			if inFence {
+				closeFence()
+				fenceBar("")
+			} else {
+				inFence = true
+				fenceLang = strings.Trim(trimmed, "`~ ")
+				fenceBar(fenceLang)
 			}
-			inFence = !inFence
-			if pad := width - displayWidth(bar); pad > 0 {
-				bar += strings.Repeat("─", pad)
-			}
-			emit([]Span{{bar, styleDim}})
 		case inFence:
-			emit([]Span{{line, styleMDCode}})
+			fenceBuf = append(fenceBuf, line)
 		case strings.HasPrefix(trimmed, "#"):
 			level := 0
 			for level < len(trimmed) && trimmed[level] == '#' {
@@ -97,7 +105,87 @@ func mdStyledLines(text string, width int, base StyleID) [][]Span {
 			emit(mdInlineSpans(line, base))
 		}
 	}
+	if inFence {
+		closeFence() // unterminated fence at end of input
+	}
 	return out
+}
+
+// highlightCode renders one fenced block as a full-width background
+// rectangle with chroma syntax highlighting (single code color when the
+// language is unknown).
+func highlightCode(lang, code string, width int) [][]Span {
+	var out [][]Span
+	for _, lineSpans := range highlightTokens(lang, code) {
+		w := width - 1
+		if w < 10 {
+			w = 10
+		}
+		for _, ws := range wrapSpans(lineSpans, w) {
+			row := append([]Span{{" ", styleCodePad}}, ws...)
+			used := 0
+			for _, sp := range row {
+				used += displayWidth(sp.Text)
+			}
+			if pad := width - used; pad > 0 {
+				row = append(row, Span{strings.Repeat(" ", pad), styleCodePad})
+			}
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// highlightTokens lexes code into per-source-line styled spans.
+func highlightTokens(lang, code string) [][]Span {
+	lines := [][]Span{{}}
+	appendText := func(text string, st StyleID) {
+		for i, part := range strings.Split(text, "\n") {
+			if i > 0 {
+				lines = append(lines, []Span{})
+			}
+			if part != "" {
+				n := len(lines) - 1
+				lines[n] = append(lines[n], Span{strings.ReplaceAll(part, "\t", "    "), st})
+			}
+		}
+	}
+	lexer := lexers.Get(lang)
+	if lexer == nil {
+		appendText(code, styleMDCode)
+		return lines
+	}
+	it, err := lexer.Tokenise(nil, code)
+	if err != nil {
+		appendText(code, styleMDCode)
+		return lines
+	}
+	for _, tok := range it.Tokens() {
+		appendText(tok.Value, synStyle(tok.Type))
+	}
+	// Lexers often force a trailing newline; drop the empty last line.
+	if n := len(lines); n > 1 && len(lines[n-1]) == 0 {
+		lines = lines[:n-1]
+	}
+	return lines
+}
+
+// synStyle maps a chroma token type to one of the viewer's syntax styles.
+func synStyle(tt chroma.TokenType) StyleID {
+	switch {
+	case tt.InCategory(chroma.Comment):
+		return styleSynComment
+	case tt.InCategory(chroma.Keyword):
+		return styleSynKeyword
+	case tt.InSubCategory(chroma.LiteralString):
+		return styleSynString
+	case tt.InSubCategory(chroma.LiteralNumber):
+		return styleSynNumber
+	case tt == chroma.NameFunction || tt == chroma.NameClass || tt == chroma.NameBuiltin || tt == chroma.NameDecorator:
+		return styleSynFunc
+	default:
+		return styleMDCode
+	}
 }
 
 // mdInlineSpans parses one line's inline markdown: `code`, **bold**,
@@ -282,91 +370,4 @@ func splitBullet(line string) (marker, rest string, ok bool) {
 		return line[:indent+i+2], t[i+2:], true
 	}
 	return "", "", false
-}
-
-// openMarkdownView writes md to the state dir and opens the configured
-// markdown viewer in a popup.
-func openMarkdownView(a *app, prID int, md string) {
-	path := filepath.Join(stateDir(), fmt.Sprintf("md-%d.md", prID))
-	if err := os.WriteFile(path, []byte(md), 0o600); err != nil {
-		a.status = "markdown ファイルを書けません: " + err.Error()
-		return
-	}
-	_, err := a.herdr.pluginPaneOpen(pluginID, "mdview", "popup", true,
-		map[string]string{envMDFile: path}, a.cfg.DifftoolWidth, a.cfg.DifftoolHeight)
-	if err != nil {
-		a.status = "markdown ビューアを開けません: " + err.Error()
-	}
-}
-
-// prMarkdown renders the PR description as a standalone markdown document.
-func prMarkdown(pr *PullRequest) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "# #%d %s\n\n", pr.ID, pr.Title)
-	fmt.Fprintf(&b, "`%s` → `%s` — %s (%s)\n\n---\n\n",
-		pr.Source.Branch.Name, pr.Destination.Branch.Name, pr.Author.Name(), pr.State)
-	b.WriteString(pr.Description())
-	b.WriteString("\n")
-	return b.String()
-}
-
-// threadMarkdown renders one comment thread (root + replies) as markdown.
-func threadMarkdown(t CommentThread) string {
-	var b strings.Builder
-	head := fmt.Sprintf("### %s (%s)", t.Root.User.Name(), t.Root.CreatedOn.Local().Format("2006-01-02 15:04"))
-	if t.Root.Inline != nil {
-		head += fmt.Sprintf(" — `%s` %s", t.Root.Inline.Path, t.lineLabel())
-	}
-	b.WriteString(head + "\n\n" + t.Root.Content.Raw + "\n")
-	for _, r := range t.Replies {
-		fmt.Fprintf(&b, "\n---\n\n### ↳ %s (%s)\n\n%s\n",
-			r.User.Name(), r.CreatedOn.Local().Format("2006-01-02 15:04"), r.Content.Raw)
-	}
-	return b.String()
-}
-
-// runMDViewUI is the mdview pane's entrypoint: run the configured markdown
-// viewer on the file, inheriting the popup PTY.
-func runMDViewUI() {
-	path := os.Getenv(envMDFile)
-	if path == "" {
-		errExit("missing " + envMDFile + "; launch me via the viewer")
-	}
-	if _, err := os.Stat(path); err != nil {
-		errExit("markdown file missing:", err)
-	}
-	cfg := loadConfig()
-	argv, hasFile := expandArgv(cfg.MarkdownViewer, "{file}", path)
-	if len(argv) == 0 {
-		errExit("markdown_viewer is empty")
-	}
-	if _, err := exec.LookPath(argv[0]); err != nil {
-		showToolInstallHelp(cfg, argv[0], []string{
-			"デフォルトの glow を使う場合:",
-			"  brew install glow",
-			"",
-			"別のビューアを使う場合は config.toml で指定できます（{file} = markdownファイル）:",
-			`  markdown_viewer = ["glow", "-p", "{file}"]`,
-			`  markdown_viewer = ["nvim", "-R", "{file}"]`,
-		})
-		return
-	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	if hasFile {
-		cmd.Stdin = os.Stdin
-	} else {
-		f, err := os.Open(path)
-		if err != nil {
-			errExit("open markdown:", err)
-		}
-		defer f.Close()
-		cmd.Stdin = f
-	}
-	if err := cmd.Run(); err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
-			os.Exit(exit.ExitCode())
-		}
-		errExit("run markdown viewer:", err)
-	}
 }

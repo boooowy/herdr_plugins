@@ -45,8 +45,16 @@ func TestMDStyledLinesBlocks(t *testing.T) {
 	if q := findLine(t, lines, "引用"); !strings.Contains(q[0].Text, "▎") || q[0].Style != styleDim {
 		t.Errorf("quote: %+v", q)
 	}
-	if findLine(t, lines, "code line")[0].Style != styleMDCode {
-		t.Error("fenced code must use styleMDCode")
+	code := findLine(t, lines, "code line")
+	if code[0].Style != styleCodePad {
+		t.Errorf("code rows must start with the bg margin: %+v", code)
+	}
+	total := 0
+	for _, sp := range code {
+		total += displayWidth(sp.Text)
+	}
+	if total != 60 {
+		t.Errorf("code row must pad to full width, got %d", total)
 	}
 	if g := findLine(t, lines, "── go "); g[0].Style != styleDim {
 		t.Errorf("fence bar with lang: %+v", g)
@@ -109,6 +117,52 @@ func TestMDInlineSpans(t *testing.T) {
 	}
 	if joined != "foo_bar_baz" {
 		t.Errorf("snake_case: %q", joined)
+	}
+}
+
+func TestHighlightTokens(t *testing.T) {
+	lines := highlightTokens("go", "func main() {\n\ts := \"hi\" // c\n}")
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d: %v", len(lines), lines)
+	}
+	styleOf := func(lineIdx int, text string) StyleID {
+		for _, sp := range lines[lineIdx] {
+			if sp.Text == text {
+				return sp.Style
+			}
+		}
+		t.Fatalf("span %q not found in %v", text, lines[lineIdx])
+		return 0
+	}
+	if styleOf(0, "func") != styleSynKeyword {
+		t.Error("keyword must use styleSynKeyword")
+	}
+	if styleOf(1, `"hi"`) != styleSynString {
+		t.Error("string must use styleSynString")
+	}
+	if styleOf(1, "// c") != styleSynComment {
+		t.Error("comment must use styleSynComment")
+	}
+
+	// Unknown language: single code style, tabs expanded.
+	plain := highlightTokens("nosuchlang", "\tx")
+	if len(plain) != 1 || plain[0][0].Style != styleMDCode || plain[0][0].Text != "    x" {
+		t.Errorf("unknown lang: %v", plain)
+	}
+}
+
+func TestUnterminatedFenceStillRenders(t *testing.T) {
+	lines := mdStyledLines("```go\nfunc x()", 40, styleNone)
+	found := false
+	for _, spans := range lines {
+		for _, sp := range spans {
+			if sp.Text == "func" && sp.Style == styleSynKeyword {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("unterminated fence must flush: %v", lines)
 	}
 }
 

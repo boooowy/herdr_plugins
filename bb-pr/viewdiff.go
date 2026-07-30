@@ -171,7 +171,7 @@ func (v *diffView) rebuild(a *app) {
 			rows = append(rows, diffLineRows(l, numW, a.w, v.wrap)...)
 			if v.showCmt {
 				for _, t := range anchored[[2]int{hi, li}] {
-					rows = append(rows, threadRows(t, a.w, true, now, "")...)
+					rows = append(rows, threadRows(t, a.w, now, "")...)
 				}
 			}
 		}
@@ -182,7 +182,7 @@ func (v *diffView) rebuild(a *app) {
 			Span{"── Orphaned comments (outdated / 現在の diff に対応なし) ", styleOutdated},
 			Span{strings.Repeat("─", max(0, a.w-52)), styleDim}))
 		for _, t := range orphans {
-			rows = append(rows, threadRows(t, a.w, true, now, "")...)
+			rows = append(rows, threadRows(t, a.w, now, "")...)
 		}
 	}
 

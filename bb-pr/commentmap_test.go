@@ -44,6 +44,22 @@ func TestBuildThreadsNesting(t *testing.T) {
 	}
 }
 
+func TestFullyDeletedThreadsAreDropped(t *testing.T) {
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	dead := mkComment(1, 0, "", nil, nil, false, base)
+	dead.Deleted = true
+	deadRootLiveReply := mkComment(2, 0, "", nil, nil, false, base)
+	deadRootLiveReply.Deleted = true
+	threads := generalThreads([]Comment{
+		dead,
+		deadRootLiveReply,
+		mkComment(3, 2, "", nil, nil, false, base.Add(time.Hour)), // live reply keeps thread 2
+	})
+	if len(threads) != 1 || threads[0].Root.ID != 2 {
+		t.Errorf("threads = %+v", threads)
+	}
+}
+
 func TestOrderedInlinePathsNewestFirst(t *testing.T) {
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	comments := []Comment{

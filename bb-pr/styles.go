@@ -9,53 +9,83 @@ import (
 // Visual styles for every element the viewer paints. Flush maps them to SGR
 // sequences via sgrTable.
 const (
-	styleNone          StyleID = iota
-	styleTitle                 // screen title / PR title (bold)
-	styleDim                   // separators, hints, muted meta
-	styleAdd                   // diff added line
-	styleDel                   // diff deleted line
-	styleHunk                  // @@ hunk headers
-	styleMeta                  // file headers, branch names
-	styleCursor                // cursor row (inverse)
-	styleTabActive             // active detail tab
-	styleTabInactive           // inactive detail tab
-	styleComment               // comment body text
-	styleCommentBorder         // comment thread box borders
-	styleOutdated              // outdated/orphaned comment badge
-	styleApproved              // approved reviewers / +stats
-	styleChangesReq            // changes-requested reviewers / -stats
-	styleError                 // error banners
-	styleAuthor                // comment/PR author names
-	styleMDHead                // markdown headings
-	styleMDCode                // markdown inline code + fenced blocks
-	styleMDLink                // markdown link text / bare URLs
-	styleItalic                // markdown emphasis
+	styleNone        StyleID = iota
+	styleTitle               // screen title / PR title (bold)
+	styleDim                 // separators, hints, muted meta
+	styleAdd                 // diff added line
+	styleDel                 // diff deleted line
+	styleHunk                // @@ hunk headers
+	styleMeta                // file headers, branch names
+	styleCursor              // cursor row (inverse)
+	styleTabActive           // active detail tab
+	styleTabInactive         // inactive detail tab
+	styleComment             // comment body text
+	styleOutdated            // outdated/orphaned comment badge
+	styleApproved            // approved reviewers / +stats
+	styleChangesReq          // changes-requested reviewers / -stats
+	styleError               // error banners
+	styleAuthor              // comment/PR author names
+	styleMDHead              // markdown headings
+	styleMDCode              // markdown inline code + fenced blocks (code bg)
+	styleMDLink              // markdown link text / bare URLs
+	styleItalic              // markdown emphasis
+	styleCodePad             // code-block padding (bg only, forms the rectangle)
+	styleSynKeyword          // syntax: keywords
+	styleSynString           // syntax: string literals
+	styleSynComment          // syntax: comments
+	styleSynNumber           // syntax: numeric literals
+	styleSynFunc             // syntax: function/class names
 )
 
-// sgrTable builds the SGR sequence for each style from the user config.
+// styleOnCommentBg is the StyleID offset for "same style, on the comment
+// background": sgrTable derives a bg-tinted variant of every base style so
+// comment areas read as blocks without border characters. Code styles keep
+// their own (later, thus winning) background.
+const styleOnCommentBg StyleID = 200
+
+func onCmtBg(s StyleID) StyleID { return s + styleOnCommentBg }
+
+// sgrTable builds the SGR sequence for each style from the user config,
+// plus a comment-background variant of every style (see styleOnCommentBg).
 func sgrTable(cfg Config) map[StyleID]string {
-	return map[StyleID]string{
-		styleTitle:         "\x1b[1m",
-		styleDim:           "\x1b[2m",
-		styleAdd:           "\x1b[" + colorCode(cfg.AddFg, false) + "m",
-		styleDel:           "\x1b[" + colorCode(cfg.DelFg, false) + "m",
-		styleHunk:          "\x1b[" + colorCode(cfg.HunkFg, false) + "m",
-		styleMeta:          "\x1b[36m",
-		styleCursor:        "\x1b[7m",
-		styleTabActive:     "\x1b[1;4m",
-		styleTabInactive:   "\x1b[2m",
-		styleComment:       "\x1b[" + colorCode(cfg.CommentFg, false) + "m",
-		styleCommentBorder: "\x1b[" + colorCode(cfg.CommentBorderFg, false) + "m",
-		styleOutdated:      "\x1b[1;" + colorCode(cfg.OutdatedFg, false) + "m",
-		styleApproved:      "\x1b[" + colorCode(cfg.AddFg, false) + "m",
-		styleChangesReq:    "\x1b[" + colorCode(cfg.DelFg, false) + "m",
-		styleError:         "\x1b[1;31m",
-		styleAuthor:        "\x1b[1;34m",
-		styleMDHead:        "\x1b[1;" + colorCode(cfg.MDHeadingFg, false) + "m",
-		styleMDCode:        "\x1b[" + colorCode(cfg.MDCodeFg, false) + "m",
-		styleMDLink:        "\x1b[4;36m",
-		styleItalic:        "\x1b[3m",
+	codeBg := "\x1b[" + colorCode(cfg.MDCodeBg, true) + "m"
+	m := map[StyleID]string{
+		styleTitle:       "\x1b[1m",
+		styleDim:         "\x1b[2m",
+		styleAdd:         "\x1b[" + colorCode(cfg.AddFg, false) + "m",
+		styleDel:         "\x1b[" + colorCode(cfg.DelFg, false) + "m",
+		styleHunk:        "\x1b[" + colorCode(cfg.HunkFg, false) + "m",
+		styleMeta:        "\x1b[36m",
+		styleCursor:      "\x1b[7m",
+		styleTabActive:   "\x1b[1;4m",
+		styleTabInactive: "\x1b[2m",
+		styleComment:     "\x1b[" + colorCode(cfg.CommentFg, false) + "m",
+		styleOutdated:    "\x1b[1;" + colorCode(cfg.OutdatedFg, false) + "m",
+		styleApproved:    "\x1b[" + colorCode(cfg.AddFg, false) + "m",
+		styleChangesReq:  "\x1b[" + colorCode(cfg.DelFg, false) + "m",
+		styleError:       "\x1b[1;31m",
+		styleAuthor:      "\x1b[1;34m",
+		styleMDHead:      "\x1b[1;" + colorCode(cfg.MDHeadingFg, false) + "m",
+		styleMDCode:      codeBg + "\x1b[" + colorCode(cfg.MDCodeFg, false) + "m",
+		styleMDLink:      "\x1b[4;36m",
+		styleItalic:      "\x1b[3m",
+		styleCodePad:     codeBg,
+		styleSynKeyword:  codeBg + "\x1b[35m",
+		styleSynString:   codeBg + "\x1b[32m",
+		styleSynComment:  codeBg + "\x1b[3;90m",
+		styleSynNumber:   codeBg + "\x1b[38;5;215m",
+		styleSynFunc:     codeBg + "\x1b[34m",
 	}
+	// Comment-area variants: the area bg comes first so a style's own bg
+	// (code blocks) still wins where present.
+	cmtBg := "\x1b[" + colorCode(cfg.CommentBg, true) + "m"
+	m[onCmtBg(styleNone)] = cmtBg
+	for id, seq := range m {
+		if id < styleOnCommentBg {
+			m[onCmtBg(id)] = cmtBg + seq
+		}
+	}
+	return m
 }
 
 // colorCode maps a color name, a 0-255 number, or a #rrggbb hex value to an

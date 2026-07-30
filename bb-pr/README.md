@@ -6,7 +6,7 @@ PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメン
 （本文はいつものエディタが popup で開きます）。approve / merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bb-pr`
-- version: `0.7.0`
+- version: `0.8.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -132,7 +132,6 @@ description = "Bitbucket PR: open viewer for current repo"
 | `w` | 長い行の折返し切替（内蔵ビューア） |
 | `c` | インラインコメント表示切替（内蔵ビューア） |
 | `C` | **コメント投稿** — diff 行:インラインコメント / スレッド上:返信 / それ以外:PRコメント。エディタが popup で開き、保存して閉じると投稿（空なら中止）。**画面には自動反映** |
-| `m` | 説明文 / 選択スレッドを **Markdown ビューア**（既定 glow）の popup で表示 |
 | `D` | PR 全体の diff を diff ツールで開く |
 | `r` | 再読込（キャッシュ破棄） |
 | `o` | ブラウザで開く |
@@ -170,21 +169,20 @@ difftool_width = "95%"        # popup のみ有効（セル数 or "95%"）
 difftool_height = "95%"
 diff_tab_title = "PR #{id}"   # difftool_placement = "tab" のタブ名。{id} {title} {repo}
 
-# m キーの Markdown ビューア（{file} = mdファイル。無ければ stdin に流す）。
-# nvim 派は ["nvim", "-R", "{file}"] にすると render-markdown.nvim 等の
-# ft=markdown プラグインがそのまま効きます（:q で閉じる）
-markdown_viewer = ["glow", "-p", "{file}"]
-md_heading_fg = "#c792ea"     # タブ内 Markdown の見出し色
-md_code_fg = "#e5c07b"        # タブ内 Markdown のコード色
 # C キーのコメント編集エディタ（未設定なら $EDITOR、それも無ければ nvim）
 comment_editor = []           # 例: ["nvim", "+startinsert", "{file}"]
+
+# タブ内 Markdown レンダリングの色
+md_heading_fg = "#c792ea"     # 見出し
+md_code_fg = "#e5c07b"        # コード（インライン / 未知言語のブロック）
+md_code_bg = "#161821"        # コードブロック / インラインコードの背景
+comment_bg = "#20222e"        # コメントエリアの背景
 
 # 色（色名 / 0-255 / #rrggbb）
 add_fg = "green"
 del_fg = "red"
 hunk_fg = "cyan"
 comment_fg = "white"
-comment_border_fg = "#8be9fd"
 outdated_fg = "yellow"
 ```
 
@@ -198,8 +196,9 @@ outdated_fg = "yellow"
 - Bitbucket API の diff は大きな PR で切り詰められます（1ファイル2000行/100KB、全体8000行、200ファイル）。
   検出時は Files タブにバナーを表示します。全文はブラウザで確認してください。
 - 説明文・コメントはタブ内で Markdown レンダリングされます（見出し・箇条書き・チェックボックス・
-  `code`・**太字**・リンク（URLは隠す）・引用・罫線・テーブル罫線）。画像やテーブルの桁揃えなど
-  完全な再現は `m` キーの外部ビューアで確認してください。
+  `code`・**太字**・リンク（URLは隠す）・引用・罫線・テーブル罫線、コードブロックは背景色付きで
+  シンタックスハイライト）。画像やテーブルの桁揃えは再現されません（`o` でブラウザへ）。
+- コメントは罫線ではなく背景色でエリアを表現し、返信は ↳ とインデントで入れ子を示します。
 
 ## 開発
 

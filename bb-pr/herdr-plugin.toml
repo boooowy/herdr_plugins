@@ -1,6 +1,6 @@
 id = "boooowy.bb-pr"
 name = "Bitbucket PR Viewer"
-version = "0.7.0"
+version = "0.8.0"
 min_herdr_version = "0.7.0"
 description = "Bitbucket Cloud PR viewer for herdr: list, diff, review comments, and comment posting without leaving the terminal."
 platforms = ["macos", "linux"]
@@ -30,13 +30,6 @@ id = "difftool"
 title = "diff"
 placement = "tab"
 command = ["./bin/bb-pr", "difftool-ui"]
-
-[[panes]]
-id = "mdview"
-# placement はリクエスト側で popup に上書きされる
-title = "markdown"
-placement = "tab"
-command = ["./bin/bb-pr", "mdview-ui"]
 
 [[panes]]
 id = "comment"
