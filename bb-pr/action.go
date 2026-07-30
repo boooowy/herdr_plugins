@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 const pluginID = "boooowy.bb-pr"
@@ -56,8 +57,18 @@ func runAction() {
 		env[envPRID] = strconv.Itoa(prID)
 	}
 	debugf("action: open viewer %s/%s pr=%d placement=%s", workspace, repo, prID, cfg.Placement)
-	if _, err := client.pluginPaneOpen(pluginID, "viewer", cfg.Placement, true, env); err != nil {
+	pane, err := client.pluginPaneOpen(pluginID, "viewer", cfg.Placement, true, env, "", "")
+	if err != nil {
 		errExit("open viewer pane:", err)
+	}
+	// Label the fresh tab so it's findable in the tab bar. Only for tab
+	// placement — with split/overlay the pane lands in an existing tab whose
+	// label belongs to the user.
+	if cfg.Placement == "tab" && pane != nil && pane.TabID != "" {
+		title := strings.NewReplacer("{repo}", repo, "{workspace}", workspace).Replace(cfg.ListTabTitle)
+		if err := client.tabRename(pane.TabID, truncateWidth(title, 40)); err != nil {
+			debugf("action: tab rename: %v", err)
+		}
 	}
 }
 

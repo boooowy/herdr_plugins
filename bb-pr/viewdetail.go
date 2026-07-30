@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -22,6 +24,10 @@ type detailView struct {
 	tab          int
 	vp           [tabCount]Viewport
 	descExpanded bool
+
+	// inlineThreadFor maps a comment root ID to its inline thread — how the
+	// Comments tab's Enter finds the file/line to jump to in the diff view.
+	inlineThreadFor map[int]CommentThread
 }
 
 func newDetailView(a *app, id int) *detailView {
@@ -62,7 +68,11 @@ func (v *detailView) load(a *app, force bool) {
 			if err != nil {
 				return nil, err
 			}
-			return func(a *app) { a.detailFor(id).comments = cs; v.rebuild(a) }, nil
+			return func(a *app) {
+				a.detailFor(id).comments = cs
+				v.rebuild(a)
+				rebuildTopDiffView(a, id)
+			}, nil
 		})
 	}
 	if d.diffText == "" {
@@ -76,6 +86,7 @@ func (v *detailView) load(a *app, force bool) {
 				dd.diffText = text
 				dd.files = ParseUnifiedDiff(text)
 				v.rebuild(a)
+				rebuildTopDiffView(a, id)
 				if req := a.pendingDifftool; req != nil && req.prID == id {
 					a.pendingDifftool = nil
 					openInDiffTool(a, req.prID, req.focus)
@@ -84,6 +95,15 @@ func (v *detailView) load(a *app, force bool) {
 		})
 	}
 	v.rebuild(a)
+}
+
+// rebuildTopDiffView refreshes a diff view sitting above this detail view
+// when its PR's data (diff text, comments) arrives late — its rows were
+// built from the incomplete cache and nothing else would regenerate them.
+func rebuildTopDiffView(a *app, prID int) {
+	if dv, ok := a.top().(*diffView); ok && dv.prID == prID {
+		dv.rebuild(a)
+	}
 }
 
 // rebuild regenerates the current tab's rows.
@@ -196,15 +216,99 @@ func (v *detailView) fileRows(a *app, d *prDetail) []Row {
 
 func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	var rows []Row
-	threads := generalThreads(d.comments)
 	now := time.Now()
-	for _, t := range threads {
-		rows = append(rows, threadRows(t, a.w, false, now)...)
+	general := generalThreads(d.comments)
+	byFile := inlineThreadsByFile(d.comments)
+	v.inlineThreadFor = map[int]CommentThread{}
+
+	inlineTotal := 0
+	for _, ts := range byFile {
+		inlineTotal += len(ts)
 	}
-	if len(threads) == 0 && a.loading == 0 {
-		rows = append(rows, textRow(Span{" (コメントはありません)", styleDim}))
+	if len(general) == 0 && inlineTotal == 0 {
+		if a.loading == 0 {
+			rows = append(rows, textRow(Span{" (コメントはありません)", styleDim}))
+		}
+		return rows
+	}
+
+	section := func(title string) {
+		line := "── " + title + " "
+		if pad := a.w - displayWidth(line) - 1; pad > 0 {
+			line += strings.Repeat("─", pad)
+		}
+		rows = append(rows, textRow(Span{line, styleDim}), textRow())
+	}
+
+	if len(general) > 0 {
+		section(fmt.Sprintf("PR コメント (%d)", len(general)))
+		for _, t := range general {
+			rows = append(rows, threadRows(t, a.w, false, now, "")...)
+		}
+	}
+	if inlineTotal > 0 {
+		section(fmt.Sprintf("インラインコメント (%d)", inlineTotal))
+		for _, path := range orderedInlinePaths(d, byFile) {
+			rows = append(rows, textRow(Span{" 📄 ", styleNone}, Span{path, styleTitle}), textRow())
+			for _, t := range byFile[path] {
+				v.inlineThreadFor[t.Root.ID] = t
+				rows = append(rows, threadRows(t, a.w, false, now, t.lineLabel())...)
+			}
+		}
 	}
 	return rows
+}
+
+// orderedInlinePaths sorts the inline-comment files in diffstat order (the
+// order the Files tab shows), unknown paths last alphabetically.
+func orderedInlinePaths(d *prDetail, byFile map[string][]CommentThread) []string {
+	pos := map[string]int{}
+	for i, st := range d.diffstat {
+		pos[st.Path()] = i
+	}
+	paths := make([]string, 0, len(byFile))
+	for p := range byFile {
+		paths = append(paths, p)
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		pi, iok := pos[paths[i]]
+		pj, jok := pos[paths[j]]
+		if iok != jok {
+			return iok
+		}
+		if iok && jok && pi != pj {
+			return pi < pj
+		}
+		return paths[i] < paths[j]
+	})
+	return paths
+}
+
+// openCommentInDiff pushes the built-in diff view scrolled to an inline
+// comment thread (Enter on the Comments tab).
+func (v *detailView) openCommentInDiff(a *app, rootID int) {
+	t, ok := v.inlineThreadFor[rootID]
+	if !ok {
+		return // general comment: nothing to jump to
+	}
+	d := a.detailFor(v.prID)
+	path := t.Root.Inline.Path
+	idx := -1
+	for i := range d.diffstat {
+		if d.diffstat[i].Path() == path || d.diffstat[i].OldPath() == path {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		a.status = "diff にファイルが見つかりません: " + path
+		return
+	}
+	dv := newDiffView(a, v.prID, idx)
+	dv.showCmt = true // the jump target is a comment box — force them visible
+	dv.pendingJump = rootID
+	dv.rebuild(a)
+	a.push(dv)
 }
 
 // statusMark maps a diffstat status to its letter and color.
@@ -255,7 +359,7 @@ func (v *detailView) render(a *app, s *Screen) {
 	labels := []string{
 		"1:Overview",
 		fmt.Sprintf("2:Files (%d)", len(d.diffstat)),
-		fmt.Sprintf("3:Comments (%d)", len(generalThreads(d.comments))),
+		fmt.Sprintf("3:Comments (%d)", commentThreadCount(d.comments)),
 	}
 	x := 1
 	for i, l := range labels {
@@ -330,13 +434,20 @@ func (v *detailView) handle(a *app, k Key) {
 		v.descExpanded = !v.descExpanded
 		v.rebuild(a)
 	case k.Kind == KeyEnter:
-		if v.tab == tabFiles {
+		switch v.tab {
+		case tabFiles:
 			if r := vp.Current(); r != nil && r.Kind == RowFile {
 				if a.cfg.FilesEnter == "builtin" {
 					a.push(newDiffView(a, v.prID, r.Item.(int)))
 				} else {
 					d := a.detailFor(v.prID)
 					openInDiffTool(a, v.prID, d.diffstat[r.Item.(int)].Path())
+				}
+			}
+		case tabComments:
+			if r := vp.Current(); r != nil && r.Kind == RowComment {
+				if id, ok := r.Item.(int); ok {
+					v.openCommentInDiff(a, id)
 				}
 			}
 		}
@@ -378,6 +489,9 @@ func (v *detailView) footer(a *app) string {
 	}
 	if v.tab == tabOverview {
 		base += "e:全文  "
+	}
+	if v.tab == tabComments {
+		base += "Enter:コードへ  "
 	}
 	return base + "D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
 }

@@ -10,7 +10,7 @@ var helpLines = []struct {
 	{"Ctrl-d / Ctrl-u", "半ページスクロール"},
 	{"Ctrl-f / Ctrl-b", "1ページスクロール (diff)"},
 	{"g / G", "先頭 / 末尾"},
-	{"Enter", "開く (一覧→詳細→diffツール) / hunk 折畳"},
+	{"Enter", "開く (一覧→詳細→diffツール / Comments→コード) / hunk 折畳"},
 	{"v", "内蔵diffビューア (Filesタブ・コメント表示付き)"},
 	{"Tab / Shift-Tab / 1-3", "詳細タブ切替"},
 	{"e", "説明文の全文表示 (Overview)"},

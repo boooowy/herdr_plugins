@@ -18,18 +18,22 @@ type Config struct {
 
 	DefaultWorkspace string `toml:"default_workspace"` // fallback: $BITBUCKET_WORKSPACE
 	DefaultRepo      string `toml:"default_repo"`
-	DefaultState     string `toml:"default_state"` // initial PR list filter
-	Placement        string `toml:"placement"`     // tab | split | zoomed | overlay
-	ShowComments     bool   `toml:"show_comments"` // inline comments in the diff view
-	ContextFold      bool   `toml:"context_fold"`  // hunks start folded
+	DefaultState     string `toml:"default_state"`  // initial PR list filter
+	Placement        string `toml:"placement"`      // tab | split | zoomed | overlay
+	ListTabTitle     string `toml:"list_tab_title"` // viewer tab label: {repo} {workspace}
+	ShowComments     bool   `toml:"show_comments"`  // inline comments in the diff view
+	ContextFold      bool   `toml:"context_fold"`   // hunks start folded
 	HTTPTimeoutSec   int    `toml:"http_timeout_sec"`
 
 	// External diff tool (Enter on a file / D key). {patch} in the argv is
 	// replaced with the patch file path; without the placeholder the patch
 	// is piped to stdin instead (delta-style tools).
-	DiffTool     []string `toml:"diff_tool"`
-	DiffTabTitle string   `toml:"diff_tab_title"` // {id} {title} {repo}
-	FilesEnter   string   `toml:"files_enter"`    // difftool | builtin
+	DiffTool          []string `toml:"diff_tool"`
+	DiffTabTitle      string   `toml:"diff_tab_title"`     // {id} {title} {repo}
+	FilesEnter        string   `toml:"files_enter"`        // difftool | builtin
+	DifftoolPlacement string   `toml:"difftool_placement"` // popup | overlay | tab | split
+	DifftoolWidth     string   `toml:"difftool_width"`     // popup only: cells or "95%"
+	DifftoolHeight    string   `toml:"difftool_height"`
 
 	AddFg           string `toml:"add_fg"`
 	DelFg           string `toml:"del_fg"`
@@ -45,20 +49,24 @@ type Config struct {
 
 func defaultConfig() Config {
 	return Config{
-		DefaultState:    "OPEN",
-		Placement:       "tab",
-		ShowComments:    true,
-		ContextFold:     false,
-		HTTPTimeoutSec:  20,
-		DiffTool:        []string{"hunk", "patch", "{patch}"},
-		DiffTabTitle:    "PR #{id}",
-		FilesEnter:      "difftool",
-		AddFg:           "green",
-		DelFg:           "red",
-		HunkFg:          "cyan",
-		CommentFg:       "white",
-		CommentBorderFg: "#8be9fd",
-		OutdatedFg:      "yellow",
+		DefaultState:      "OPEN",
+		Placement:         "tab",
+		ListTabTitle:      "PRs {repo}",
+		ShowComments:      true,
+		ContextFold:       false,
+		HTTPTimeoutSec:    20,
+		DiffTool:          []string{"hunk", "patch", "{patch}"},
+		DiffTabTitle:      "PR #{id}",
+		FilesEnter:        "difftool",
+		DifftoolPlacement: "popup",
+		DifftoolWidth:     "95%",
+		DifftoolHeight:    "95%",
+		AddFg:             "green",
+		DelFg:             "red",
+		HunkFg:            "cyan",
+		CommentFg:         "white",
+		CommentBorderFg:   "#8be9fd",
+		OutdatedFg:        "yellow",
 	}
 }
 
@@ -100,6 +108,14 @@ func loadConfig() Config {
 	}
 	if cfg.FilesEnter != "builtin" {
 		cfg.FilesEnter = "difftool"
+	}
+	switch cfg.DifftoolPlacement {
+	case "popup", "overlay", "tab", "split":
+	default:
+		cfg.DifftoolPlacement = defaultConfig().DifftoolPlacement
+	}
+	if cfg.ListTabTitle == "" {
+		cfg.ListTabTitle = defaultConfig().ListTabTitle
 	}
 	return cfg
 }

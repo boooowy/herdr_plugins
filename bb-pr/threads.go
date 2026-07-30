@@ -8,7 +8,9 @@ import (
 // threadRows renders one comment thread as viewport rows. boxed draws the
 // ┌/│/└ frame used inside the diff view; the Comments tab renders unframed.
 // The root header row is selectable so the cursor can walk threads.
-func threadRows(t CommentThread, width int, boxed bool, now time.Time) []Row {
+// anchorLabel ("L486–496" etc.) prefixes the header when non-empty — the
+// Comments tab uses it; the diff view passes "" (the code line is visible).
+func threadRows(t CommentThread, width int, boxed bool, now time.Time, anchorLabel string) []Row {
 	var rows []Row
 	bodyW := width - 4
 	if boxed {
@@ -31,6 +33,9 @@ func threadRows(t CommentThread, width int, boxed bool, now time.Time) []Row {
 		header = append(header, Span{" ┌─", styleCommentBorder})
 	} else {
 		header = append(header, Span{" ", styleNone})
+	}
+	if anchorLabel != "" {
+		header = append(header, Span{anchorLabel + " ", styleMeta})
 	}
 	header = append(header,
 		Span{"💬 ", styleNone},

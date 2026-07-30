@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -67,6 +68,56 @@ func TestInlineReplyFollowsRootFile(t *testing.T) {
 	byFile := inlineThreadsByFile(comments)
 	if len(byFile["a.go"]) != 1 || len(byFile["a.go"][0].Replies) != 1 {
 		t.Errorf("reply not attached: %+v", byFile)
+	}
+}
+
+func TestLineLabel(t *testing.T) {
+	mk := func(in *InlineAnchor) *CommentThread {
+		th := &CommentThread{}
+		th.Root.Inline = in
+		return th
+	}
+	cases := []struct {
+		in   *InlineAnchor
+		want string
+	}{
+		{nil, ""},
+		{&InlineAnchor{To: iptr(496)}, "L496"},
+		{&InlineAnchor{To: iptr(496), StartTo: iptr(486)}, "L486–496"},
+		{&InlineAnchor{To: iptr(496), StartTo: iptr(496)}, "L496"}, // degenerate range
+		{&InlineAnchor{From: iptr(12)}, "旧L12"},
+		{&InlineAnchor{From: iptr(12), StartFrom: iptr(10)}, "旧L10–12"},
+		{&InlineAnchor{}, ""},
+	}
+	for i, c := range cases {
+		if got := mk(c.in).lineLabel(); got != c.want {
+			t.Errorf("case %d: got %q, want %q", i, got, c.want)
+		}
+	}
+}
+
+func TestInlineAnchorDecodesStartRange(t *testing.T) {
+	var in InlineAnchor
+	raw := `{"from": null, "to": 496, "path": "a.py", "start_from": null, "start_to": 486}`
+	if err := json.Unmarshal([]byte(raw), &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.StartTo == nil || *in.StartTo != 486 || in.To == nil || *in.To != 496 {
+		t.Errorf("anchor = %+v", in)
+	}
+}
+
+func TestCommentThreadCount(t *testing.T) {
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	comments := []Comment{
+		mkComment(1, 0, "", nil, nil, false, base),          // general root
+		mkComment(2, 1, "", nil, nil, false, base),          // reply (same thread)
+		mkComment(3, 0, "a.py", nil, iptr(10), false, base), // inline root
+		mkComment(4, 0, "b.py", nil, iptr(20), false, base), // inline root
+		mkComment(5, 3, "a.py", nil, iptr(10), false, base), // inline reply
+	}
+	if n := commentThreadCount(comments); n != 3 {
+		t.Errorf("count = %d, want 3", n)
 	}
 }
 

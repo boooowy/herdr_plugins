@@ -114,12 +114,15 @@ func (d DiffStatEntry) OldPath() string {
 
 // InlineAnchor positions an inline comment inside the PR diff. To is the
 // line on the new side, From on the old side; a comment on a deleted line
-// has only From.
+// has only From. Multi-line selections carry the range start in
+// StartTo/StartFrom (e.g. start_to:486 + to:496 = lines 486–496).
 type InlineAnchor struct {
-	Path     string `json:"path"`
-	From     *int   `json:"from"`
-	To       *int   `json:"to"`
-	Outdated bool   `json:"outdated"`
+	Path      string `json:"path"`
+	From      *int   `json:"from"`
+	To        *int   `json:"to"`
+	StartFrom *int   `json:"start_from"`
+	StartTo   *int   `json:"start_to"`
+	Outdated  bool   `json:"outdated"`
 }
 
 // Comment is one PR comment: general (Inline == nil) or inline.

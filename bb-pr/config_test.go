@@ -15,13 +15,19 @@ func TestLoadConfigDefaultsWhenMissing(t *testing.T) {
 	if cfg.loadErr != "" {
 		t.Errorf("missing file must not set loadErr, got %q", cfg.loadErr)
 	}
+	if cfg.DifftoolPlacement != "popup" || cfg.DifftoolWidth != "95%" || cfg.DifftoolHeight != "95%" {
+		t.Errorf("difftool defaults: %+v", cfg)
+	}
+	if cfg.ListTabTitle != "PRs {repo}" {
+		t.Errorf("list_tab_title default: %q", cfg.ListTabTitle)
+	}
 }
 
 func TestLoadConfigBadValuesFallBack(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", dir)
 	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(
-		"placement = \"floating\"\ndefault_state = \"open\"\nhttp_timeout_sec = -1\nshow_comments = false\n"), 0o644)
+		"placement = \"floating\"\ndefault_state = \"open\"\nhttp_timeout_sec = -1\nshow_comments = false\ndifftool_placement = \"floating\"\n"), 0o644)
 	cfg := loadConfig()
 	if cfg.Placement != "tab" {
 		t.Errorf("invalid placement should fall back to tab, got %q", cfg.Placement)
@@ -34,6 +40,9 @@ func TestLoadConfigBadValuesFallBack(t *testing.T) {
 	}
 	if cfg.ShowComments {
 		t.Error("show_comments=false must stick")
+	}
+	if cfg.DifftoolPlacement != "popup" {
+		t.Errorf("invalid difftool_placement should fall back to popup, got %q", cfg.DifftoolPlacement)
 	}
 }
 

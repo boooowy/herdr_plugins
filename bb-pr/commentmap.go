@@ -1,6 +1,9 @@
 package main
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
 // CommentThread is one root comment with its replies flattened in
 // chronological order (nested replies land under the same root).
@@ -68,6 +71,15 @@ func generalThreads(comments []Comment) []CommentThread {
 	return buildThreads(comments, func(c *Comment) bool { return c.Inline == nil })
 }
 
+// commentThreadCount is the Comments tab's badge: general + inline threads.
+func commentThreadCount(comments []Comment) int {
+	n := len(generalThreads(comments))
+	for _, ts := range inlineThreadsByFile(comments) {
+		n += len(ts)
+	}
+	return n
+}
+
 // inlineThreadsByFile groups inline comment threads by file path.
 func inlineThreadsByFile(comments []Comment) map[string][]CommentThread {
 	all := buildThreads(comments, func(c *Comment) bool { return c.Inline != nil })
@@ -92,6 +104,29 @@ func (t *CommentThread) anchor() (newLine, oldLine int) {
 		return 0, *in.From
 	}
 	return 0, 0
+}
+
+// lineLabel renders the anchor's line (range) for list display: "L486–496",
+// "L496", or "旧L12" for old-side anchors. "" for non-inline threads. Ranges
+// come only from the API's start_to/start_from — never guessed.
+func (t *CommentThread) lineLabel() string {
+	in := t.Root.Inline
+	if in == nil {
+		return ""
+	}
+	if in.To != nil && *in.To > 0 {
+		if in.StartTo != nil && *in.StartTo > 0 && *in.StartTo != *in.To {
+			return fmt.Sprintf("L%d–%d", *in.StartTo, *in.To)
+		}
+		return fmt.Sprintf("L%d", *in.To)
+	}
+	if in.From != nil && *in.From > 0 {
+		if in.StartFrom != nil && *in.StartFrom > 0 && *in.StartFrom != *in.From {
+			return fmt.Sprintf("旧L%d–%d", *in.StartFrom, *in.From)
+		}
+		return fmt.Sprintf("旧L%d", *in.From)
+	}
+	return ""
 }
 
 // matchesLine reports whether the thread anchors to this diff line.

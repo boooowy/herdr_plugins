@@ -19,6 +19,10 @@ type diffView struct {
 	folded  map[int]bool
 	showCmt bool
 	pending rune // first key of a two-key sequence (]h, [h, ]f, [f, za, zA)
+
+	// pendingJump is a comment root ID to scroll to once its row exists
+	// (set when the Comments tab jumps into the diff); 0 = none.
+	pendingJump int
 }
 
 func newDiffView(a *app, prID, fileIdx int) *diffView {
@@ -166,7 +170,7 @@ func (v *diffView) rebuild(a *app) {
 			rows = append(rows, diffLineRow(l, numW, a.w))
 			if v.showCmt {
 				for _, t := range anchored[[2]int{hi, li}] {
-					rows = append(rows, threadRows(t, a.w, true, now)...)
+					rows = append(rows, threadRows(t, a.w, true, now, "")...)
 				}
 			}
 		}
@@ -177,7 +181,7 @@ func (v *diffView) rebuild(a *app) {
 			Span{"── Orphaned comments (outdated / 現在の diff に対応なし) ", styleOutdated},
 			Span{strings.Repeat("─", max(0, a.w-52)), styleDim}))
 		for _, t := range orphans {
-			rows = append(rows, threadRows(t, a.w, true, now)...)
+			rows = append(rows, threadRows(t, a.w, true, now, "")...)
 		}
 	}
 
@@ -224,7 +228,30 @@ func hunkCommentCount(anchored map[[2]int][]CommentThread, hi int) int {
 	return n
 }
 
+// tryPendingJump moves the cursor to the pendingJump comment row. It needs
+// a real viewport height (Paint sets vp.H), so render passes the frame's
+// height explicitly before painting.
+func (v *diffView) tryPendingJump(h int) {
+	if v.pendingJump == 0 {
+		return
+	}
+	for i, r := range v.vp.Rows {
+		if r.Kind == RowComment && r.Selectable {
+			if id, ok := r.Item.(int); ok && id == v.pendingJump {
+				v.vp.Cursor = i
+				if h > 0 {
+					v.vp.H = h
+					v.vp.EnsureVisible()
+					v.pendingJump = 0
+				}
+				return
+			}
+		}
+	}
+}
+
 func (v *diffView) render(a *app, s *Screen) {
+	v.tryPendingJump(a.h - 3)
 	_, st, f := v.fileDiff(a)
 	d := a.detailFor(v.prID)
 	title := " (no file)"

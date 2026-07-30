@@ -55,9 +55,30 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		return
 	}
 
-	// Reuse the PR's existing diff tab when it already shows this focus
-	// file; otherwise close it and start fresh so the tool re-reads the
-	// reordered patch.
+	env := map[string]string{
+		envDiffFile:  path,
+		envHunkTitle: diffTabTitle(a.cfg.DiffTabTitle, prID, d.pr, a.ctx.Repo),
+	}
+
+	placement := a.cfg.DifftoolPlacement
+	if placement != "tab" {
+		// popup/overlay/split are one-shot: they close with the tool (popup
+		// isn't even a pane), so there is nothing to reuse or rename.
+		width, height := "", ""
+		if placement == "popup" {
+			width, height = a.cfg.DifftoolWidth, a.cfg.DifftoolHeight
+		}
+		if _, err := a.herdr.pluginPaneOpen(pluginID, "difftool", placement, true, env, width, height); err != nil {
+			a.status = "diff ツールを開けません: " + err.Error()
+			return
+		}
+		debugf("difftool: opened %s for pr %d", placement, prID)
+		return
+	}
+
+	// Tab placement: reuse the PR's existing diff tab when it already shows
+	// this focus file; otherwise close it and start fresh so the tool
+	// re-reads the reordered patch.
 	if ref, ok := a.difftoolPanes[prID]; ok {
 		if _, err := a.herdr.paneByID(ref.PaneID); err == nil {
 			if ref.Focus == focusPath {
@@ -74,10 +95,7 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		delete(a.difftoolPanes, prID)
 	}
 
-	pane, err := a.herdr.pluginPaneOpen(pluginID, "difftool", "tab", true, map[string]string{
-		envDiffFile:  path,
-		envHunkTitle: diffTabTitle(a.cfg.DiffTabTitle, prID, d.pr, a.ctx.Repo),
-	})
+	pane, err := a.herdr.pluginPaneOpen(pluginID, "difftool", "tab", true, env, "", "")
 	if err != nil {
 		a.status = "diff ツールのペインを開けません: " + err.Error()
 		return

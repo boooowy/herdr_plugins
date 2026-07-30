@@ -144,9 +144,11 @@ type openedPane struct {
 }
 
 // pluginPaneOpen asks herdr to open one of this plugin's [[panes]]
-// entrypoints and returns the created pane/tab ids. env is forwarded into
-// the pane process's environment.
-func (c *herdrClient) pluginPaneOpen(pluginID, entrypoint, placement string, focus bool, env map[string]string) (*openedPane, error) {
+// entrypoints and returns the created pane/tab ids (zero for popup
+// placement — popups are not panes). env is forwarded into the pane
+// process's environment; width/height are popup-only (herdr rejects them
+// elsewhere) and may be cells ("120") or a percentage ("95%").
+func (c *herdrClient) pluginPaneOpen(pluginID, entrypoint, placement string, focus bool, env map[string]string, width, height string) (*openedPane, error) {
 	params := map[string]any{
 		"plugin_id":  pluginID,
 		"entrypoint": entrypoint,
@@ -155,6 +157,12 @@ func (c *herdrClient) pluginPaneOpen(pluginID, entrypoint, placement string, foc
 	}
 	if len(env) > 0 {
 		params["env"] = env
+	}
+	if width != "" {
+		params["width"] = width
+	}
+	if height != "" {
+		params["height"] = height
 	}
 	var out struct {
 		PluginPane struct {
