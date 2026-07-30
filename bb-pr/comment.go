@@ -66,13 +66,24 @@ func openCommentEditor(a *app, prID int, inline *InlineAnchor, parentID int) {
 // and refetches the PR's comments when it appears. A vanished draft without
 // a marker means the user cancelled.
 func watchCommentMarker(a *app, prID int, draft string) {
-	marker := draft + ".posted"
-	for i := 0; i < 1800; i++ { // up to 15 min at 500ms
+	watchPostedMarker(a, prID, draft+".posted", draft, 15*time.Minute, "コメントを投稿しました")
+}
+
+// watchPostMarker is the difftool variant: the pane touches the marker after
+// posting hunk draft notes. Diff tabs can stay open for hours, hence the
+// long timeout; there is no draft file to signal cancellation.
+func watchPostMarker(a *app, prID int, marker string) {
+	watchPostedMarker(a, prID, marker, "", 4*time.Hour, "hunk の note を投稿しました")
+}
+
+func watchPostedMarker(a *app, prID int, marker, cancelFile string, maxWait time.Duration, msg string) {
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
 		time.Sleep(500 * time.Millisecond)
 		if _, err := os.Stat(marker); err == nil {
 			os.Remove(marker)
 			a.resultCh <- func(a *app) {
-				a.status = "コメントを投稿しました"
+				a.status = msg
 				a.detailFor(prID).comments = nil
 				for _, vw := range a.stack {
 					if dv, ok := vw.(*detailView); ok && dv.prID == prID {
@@ -83,8 +94,10 @@ func watchCommentMarker(a *app, prID int, draft string) {
 			}
 			return
 		}
-		if _, err := os.Stat(draft); os.IsNotExist(err) {
-			return // cancelled
+		if cancelFile != "" {
+			if _, err := os.Stat(cancelFile); os.IsNotExist(err) {
+				return // cancelled
+			}
 		}
 	}
 }

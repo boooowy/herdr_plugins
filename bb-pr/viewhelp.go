@@ -28,7 +28,6 @@ var helpByCtx = map[string]struct {
 		{"j / k / ↑ / ↓", "移動"},
 		{"Enter", "Files: diffツールで開く / Comments: コードへジャンプ"},
 		{"v", "内蔵diffビューアで開く (Filesタブ)"},
-		{"e", "説明文の全文表示 (Overview)"},
 		{"C", "コメント投稿 (Comments のスレッド上では返信)"},
 		{"D", "PR全体のdiffをdiffツールで開く"},
 		{"y", "PR URL をコピー"},

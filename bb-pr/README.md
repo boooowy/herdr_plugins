@@ -6,7 +6,7 @@ PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメン
 （本文はいつものエディタが popup で開きます）。approve / merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bb-pr`
-- version: `0.8.0`
+- version: `0.9.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -15,6 +15,14 @@ Files タブでファイルを Enter すると、PR 全体の diff が**外部 d
 **選択したファイルが先頭に表示**されます。q でツールを閉じればすぐビューアに戻れます。
 インラインコメントを diff 行に埋め込み表示する**内蔵ビューア**（`v` キー）も併用でき、
 Comments タブのインラインコメントで Enter するとコード文脈へジャンプします。
+
+hunk とは双方向に連携します（hunk 0.13 以上）:
+
+- **既存コメントの表示** — PR のインラインコメント（返信含む）が hunk の diff 内に
+  注釈として表示されます。hunk の Next/Previous Comment ショートカットで注釈間を移動できます。
+- **Draft note の投稿** — hunk 内で `+`（または `c`）で入力した draft note は、
+  hunk を閉じたときに一覧確認画面が出て、`y` で Bitbucket のインラインコメントとして
+  一括投稿されます（`n` で破棄）。投稿後はビューアの Comments に自動反映されます。
 
 ## 画面
 
@@ -61,7 +69,8 @@ PR 更新後に位置がずれたコメント（outdated）は捨てずに、各
 - Bitbucket Cloud の API トークン（後述）
 - （任意）[hunk](https://github.com/modem-dev/hunk) — デフォルトの外部 diff ビューア。
   `brew install hunk` または `npm i -g hunkdiff`。`diff_tool` 設定で別ツールに変更可能で、
-  無くても内蔵ビューアだけで動作します
+  無くても内蔵ビューアだけで動作します。コメント連携（注釈表示 / draft note 投稿）には
+  hunk 0.13 以上が必要です
 
 ## インストール
 
@@ -124,7 +133,6 @@ description = "Bitbucket PR: open viewer for current repo"
 | `Enter` | 開く（一覧→詳細→**diff ツール**、Comments のインラインコメント→**コードへジャンプ**）/ 内蔵ビューアでは hunk 折畳トグル |
 | `v` | 内蔵 diff ビューアで開く（Files タブ。インラインコメント埋め込み表示） |
 | `Tab` / `Shift-Tab` / `1`-`3` / `l` / `h`（`→` / `←`） | 詳細タブ切替（Overview / Files / Comments） |
-| `e` | 説明文の全文表示（Overview） |
 | `s` / `Tab` / `l` / `h`（`→` / `←`） | state フィルタ切替（OPEN / MERGED / DECLINED / SUPERSEDED）（一覧） |
 | `]h` / `[h` | 次 / 前の hunk（内蔵ビューア） |
 | `]f` / `[f`（`→` / `←`） | 次 / 前のファイル（内蔵ビューア） |
@@ -156,8 +164,10 @@ context_fold = false     # true で内蔵ビューアの hunk を折り畳んだ
 http_timeout_sec = 20
 
 # 外部 diff ツール（{patch} が patch ファイルパスに置換される。
-# {patch} が無い場合は patch を stdin に流す）
-diff_tool = ["hunk", "patch", "{patch}"]
+# {patch} が無い場合は patch を stdin に流す。{ctx} は既存コメントを hunk の
+# 注釈として表示するための agent-context JSON のパス — hunk 以外のツールでは外す。
+# --agent-notes は注釈を初期表示にするフラグ）
+diff_tool = ["hunk", "patch", "{patch}", "--agent-context", "{ctx}", "--agent-notes"]
 files_enter = "difftool"      # difftool | builtin — Files タブ Enter の動作
 
 # diff ツールの表示先。popup は herdr 0.7.5 以上（それ未満は "tab" を設定）。
@@ -199,6 +209,10 @@ outdated_fg = "yellow"
   `code`・**太字**・リンク（URLは隠す）・引用・罫線・テーブル罫線、コードブロックは背景色付きで
   シンタックスハイライト）。画像やテーブルの桁揃えは再現されません（`o` でブラウザへ）。
 - コメントは罫線ではなく背景色でエリアを表現し、返信は ↳ とインデントで入れ子を示します。
+  Comments タブのインラインコメントには対象の diff 行が抜粋表示されます。
+- hunk の draft note は hunk のプロセス終了と同時に hunk 側から消えるため、bb-pr は hunk の
+  起動中に 0.5 秒間隔でローカルの hunk セッションから note を取得しています。note を書き終えた
+  直後（0.5秒以内）に q で閉じると取りこぼす理論上の窓がありますが、実用上は問題ありません。
 
 ## 開発
 

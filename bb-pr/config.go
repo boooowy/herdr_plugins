@@ -27,7 +27,8 @@ type Config struct {
 
 	// External diff tool (Enter on a file / D key). {patch} in the argv is
 	// replaced with the patch file path; without the placeholder the patch
-	// is piped to stdin instead (delta-style tools).
+	// is piped to stdin instead (delta-style tools). {ctx} becomes the hunk
+	// agent-context JSON (existing PR comments as inline annotations).
 	DiffTool          []string `toml:"diff_tool"`
 	DiffTabTitle      string   `toml:"diff_tab_title"`     // {id} {title} {repo}
 	FilesEnter        string   `toml:"files_enter"`        // difftool | builtin
@@ -59,7 +60,7 @@ func defaultConfig() Config {
 		ShowComments:      true,
 		ContextFold:       false,
 		HTTPTimeoutSec:    20,
-		DiffTool:          []string{"hunk", "patch", "{patch}"},
+		DiffTool:          []string{"hunk", "patch", "{patch}", "--agent-context", "{ctx}", "--agent-notes"},
 		DiffTabTitle:      "PR #{id}",
 		FilesEnter:        "difftool",
 		DifftoolPlacement: "popup",

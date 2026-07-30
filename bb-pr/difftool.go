@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 )
@@ -19,8 +20,10 @@ import (
 // is reused per PR; tools watching the patch file (hunk's --watch) reload
 // on rewrite.
 const (
-	envDiffFile  = "BBPR_DIFF_FILE"
-	envHunkTitle = "BBPR_DIFF_TITLE"
+	envDiffFile   = "BBPR_DIFF_FILE"
+	envHunkTitle  = "BBPR_DIFF_TITLE"
+	envDiffCtx    = "BBPR_DIFF_CTX"    // hunk --agent-context sidecar path
+	envDiffMarker = "BBPR_DIFF_MARKER" // touched after draft notes are posted
 )
 
 // paneRef remembers the tab a PR's diff tool runs in, and which file the
@@ -50,10 +53,24 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		a.status = "patch ファイルを書けません: " + err.Error()
 		return
 	}
+	// Existing inline comments ride along as hunk annotations ({ctx} in
+	// diff_tool); the marker file lets the pane signal posted draft notes
+	// back so the viewer refreshes its comments.
+	ctxPath := filepath.Join(stateDir(), fmt.Sprintf("pr-%d-ctx.json", prID))
+	if err := os.WriteFile(ctxPath, buildAgentContext(d.comments, time.Now()), 0o600); err != nil {
+		debugf("difftool: agent context: %v", err)
+		ctxPath = ""
+	}
+	marker := filepath.Join(stateDir(), fmt.Sprintf("dtpost-%d-%d", prID, time.Now().UnixNano()))
 
 	env := map[string]string{
-		envDiffFile:  path,
-		envHunkTitle: diffTabTitle(a.cfg.DiffTabTitle, prID, d.pr, a.ctx.Repo),
+		envDiffFile:   path,
+		envHunkTitle:  diffTabTitle(a.cfg.DiffTabTitle, prID, d.pr, a.ctx.Repo),
+		envDiffCtx:    ctxPath,
+		envDiffMarker: marker,
+		envWorkspace:  a.ctx.Workspace,
+		envRepo:       a.ctx.Repo,
+		envPRID:       strconv.Itoa(prID),
 	}
 
 	placement := a.cfg.DifftoolPlacement
@@ -69,6 +86,7 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 			return
 		}
 		debugf("difftool: opened %s for pr %d", placement, prID)
+		go watchPostMarker(a, prID, marker)
 		return
 	}
 
@@ -97,6 +115,7 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		return
 	}
 	a.difftoolPanes[prID] = paneRef{PaneID: pane.PaneID, TabID: pane.TabID, Focus: focusPath}
+	go watchPostMarker(a, prID, marker)
 	title := diffTabTitle(a.cfg.DiffTabTitle, prID, d.pr, a.ctx.Repo)
 	if err := a.herdr.tabRename(pane.TabID, title); err != nil {
 		debugf("difftool: tab rename: %v", err)
@@ -178,6 +197,27 @@ func diffToolArgv(argv []string, patchPath string) (out []string, useStdin bool)
 	return out, !found
 }
 
+// expandCtxArg fills {ctx} with the agent-context sidecar path. Without a
+// path, the {ctx} argument is dropped along with a preceding flag (so the
+// default ["--agent-context", "{ctx}"] pair disappears cleanly).
+func expandCtxArg(argv []string, ctxPath string) []string {
+	if ctxPath != "" {
+		out, _ := expandArgv(argv, "{ctx}", ctxPath)
+		return out
+	}
+	var out []string
+	for _, a := range argv {
+		if strings.Contains(a, "{ctx}") {
+			if len(out) > 0 && strings.HasPrefix(out[len(out)-1], "-") {
+				out = out[:len(out)-1]
+			}
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // runDiffToolUI is the difftool pane's entrypoint: run the configured tool
 // on the patch file, inheriting the pane PTY.
 func runDiffToolUI() {
@@ -190,6 +230,7 @@ func runDiffToolUI() {
 	}
 	cfg := loadConfig()
 	argv, useStdin := diffToolArgv(cfg.DiffTool, patch)
+	argv = expandCtxArg(argv, os.Getenv(envDiffCtx))
 	if len(argv) == 0 {
 		errExit("diff_tool is empty")
 	}
@@ -213,7 +254,27 @@ func runDiffToolUI() {
 	} else {
 		cmd.Stdin = os.Stdin
 	}
-	if err := cmd.Run(); err != nil {
+	// Draft-note harvesting only makes sense for hunk (it owns the session
+	// daemon the notes live in). The daemon speaks loopback HTTP, so hunk
+	// needs the proxy exemption too.
+	isHunk := filepath.Base(argv[0]) == "hunk"
+	if isHunk {
+		cmd.Env = loopbackEnv()
+	}
+	if err := cmd.Start(); err != nil {
+		errExit("run diff tool:", err)
+	}
+	var harvest *noteHarvester
+	if isHunk {
+		harvest = startNoteHarvest(cmd.Process.Pid)
+	}
+	err := cmd.Wait()
+	if harvest != nil {
+		if notes := harvest.finish(); len(notes) > 0 {
+			offerNotePosting(cfg, notes)
+		}
+	}
+	if err != nil {
 		if exit, ok := err.(*exec.ExitError); ok {
 			os.Exit(exit.ExitCode())
 		}
@@ -255,4 +316,29 @@ func paintAndWaitKey(s *Screen, cfg Config) {
 		defer term.Restore(int(os.Stdin.Fd()), old)
 	}
 	newKeyReader(os.Stdin).Read()
+}
+
+// paintAndWaitYes flushes a full-screen prompt and reads keys until y
+// (true) or n/q/Esc/Ctrl-C (false).
+func paintAndWaitYes(s *Screen, cfg Config) bool {
+	out := bufio.NewWriter(os.Stdout)
+	s.Flush(out, sgrTable(cfg))
+	out.Flush()
+	if old, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
+		defer term.Restore(int(os.Stdin.Fd()), old)
+	}
+	kr := newKeyReader(os.Stdin)
+	for {
+		k, err := kr.Read()
+		if err != nil {
+			return false
+		}
+		switch {
+		case isKey(k, 'y') || isKey(k, 'Y'):
+			return true
+		case isKey(k, 'n') || isKey(k, 'q') || k.Kind == KeyEsc ||
+			(k.Kind == KeyCtrl && k.R == 'c'):
+			return false
+		}
+	}
 }

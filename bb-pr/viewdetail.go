@@ -14,16 +14,13 @@ const (
 	tabCount
 )
 
-const descPreviewLines = 8
-
 // detailView shows one PR with three tabs: Overview / Files / Comments
 // (atlas.nvim's five tabs collapsed — Conversation/Review duplicated
 // comments there).
 type detailView struct {
-	prID         int
-	tab          int
-	vp           [tabCount]Viewport
-	descExpanded bool
+	prID int
+	tab  int
+	vp   [tabCount]Viewport
 
 	// inlineThreadFor maps a comment root ID to its inline thread — how the
 	// Comments tab's Enter finds the file/line to jump to in the diff view.
@@ -128,16 +125,8 @@ func (v *detailView) overviewRows(a *app, d *prDetail) []Row {
 	if desc == "" {
 		rows = append(rows, textRow(Span{" (説明はありません)", styleDim}))
 	} else {
-		lines := mdStyledLines(desc, a.w-3, styleNone)
-		truncated := !v.descExpanded && len(lines) > descPreviewLines
-		if truncated {
-			lines = lines[:descPreviewLines]
-		}
-		for _, spans := range lines {
+		for _, spans := range mdStyledLines(desc, a.w-3, styleNone) {
 			rows = append(rows, textRow(append([]Span{{" ", styleNone}}, spans...)...))
-		}
-		if truncated {
-			rows = append(rows, textRow(Span{" … (e で全文表示)", styleDim}))
 		}
 	}
 
@@ -243,7 +232,7 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	if len(general) > 0 {
 		section(fmt.Sprintf("PR コメント (%d)", len(general)))
 		for _, t := range general {
-			rows = append(rows, threadRows(t, a.w, now, "")...)
+			rows = append(rows, threadRows(t, a.w, now, "", nil)...)
 		}
 	}
 	if inlineTotal > 0 {
@@ -252,11 +241,64 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 			rows = append(rows, textRow(Span{" 📄 ", styleNone}, Span{path, styleTitle}), textRow())
 			for _, t := range byFile[path] {
 				v.inlineThreadFor[t.Root.ID] = t
-				rows = append(rows, threadRows(t, a.w, now, t.lineLabel())...)
+				excerpt := commentExcerptRows(t, d.files, a.w)
+				rows = append(rows, threadRows(t, a.w, now, t.lineLabel(), excerpt)...)
 			}
 		}
 	}
 	return rows
+}
+
+// commentExcerptRows renders the diff line an inline thread anchors to —
+// the "which code is this about?" context the Comments tab used to lack.
+// Nil when the diff isn't loaded yet, the thread is outdated, or the line
+// isn't in the current diff (all fall back to the plain header).
+func commentExcerptRows(t CommentThread, files []FileDiff, width int) []Row {
+	l, ok := anchoredDiffLine(t, files)
+	if !ok {
+		return nil
+	}
+	no := l.NewNo
+	if no == 0 {
+		no = l.OldNo
+	}
+	marker, style := " ", styleNone
+	switch l.Kind {
+	case LineAdd:
+		marker, style = "+", styleAdd
+	case LineDel:
+		marker, style = "-", styleDel
+	}
+	text := strings.ReplaceAll(l.Text, "\t", "    ")
+	spans := []Span{
+		{fmt.Sprintf("   %4d ", no), onCmtBg(styleDim)},
+		{marker + " ", onCmtBg(style)},
+		{truncateWidth(text, width-11), onCmtBg(style)},
+	}
+	return []Row{{Kind: RowComment, Spans: padBgRow(spans, width)}}
+}
+
+// anchoredDiffLine finds the diff line an inline thread points at (a range
+// comment anchors at its last line, matching lineLabel).
+func anchoredDiffLine(t CommentThread, files []FileDiff) (DiffLine, bool) {
+	if t.Root.Inline == nil {
+		return DiffLine{}, false
+	}
+	path := t.Root.Inline.Path
+	for i := range files {
+		f := &files[i]
+		if f.Path() != path && f.OldPath != path {
+			continue
+		}
+		for hi := range f.Hunks {
+			for _, l := range f.Hunks[hi].Lines {
+				if t.matchesLine(l) {
+					return l, true
+				}
+			}
+		}
+	}
+	return DiffLine{}, false
 }
 
 // orderedInlinePaths sorts the inline-comment files so the one holding the
@@ -429,9 +471,6 @@ func (v *detailView) handle(a *app, k Key) {
 			vp.Cursor = i
 			vp.EnsureVisible()
 		}
-	case isKey(k, 'e'):
-		v.descExpanded = !v.descExpanded
-		v.rebuild(a)
 	case k.Kind == KeyEnter:
 		switch v.tab {
 		case tabFiles:
@@ -502,9 +541,6 @@ func (v *detailView) footer(a *app) string {
 		} else {
 			base += "Enter:diffツール  v:内蔵diff  "
 		}
-	}
-	if v.tab == tabOverview {
-		base += "e:全文  "
 	}
 	if v.tab == tabComments {
 		base += "Enter:コードへ  "
