@@ -55,9 +55,13 @@ func (e *httpError) Error() string {
 	return fmt.Sprintf("bitbucket api: HTTP %d for %s: %s", e.Status, e.URL, msg)
 }
 
-// do performs one authenticated GET with a single retry on 429/5xx.
+// do performs one authenticated GET, retrying up to twice on transport
+// errors and 429/5xx. Transport errors matter as much as status codes here:
+// through a forward proxy (HTTPS_PROXY) a fresh CONNECT sporadically hangs
+// or is refused, and a process's very first request is the most exposed.
 func (c *bbClient) do(rawURL string) (*http.Response, error) {
-	for attempt := 0; ; attempt++ {
+	const maxAttempts = 3
+	for attempt := 1; ; attempt++ {
 		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 		if err != nil {
 			return nil, err
@@ -65,15 +69,18 @@ func (c *bbClient) do(rawURL string) (*http.Response, error) {
 		req.SetBasicAuth(c.email, c.token)
 		resp, err := c.http.Do(req)
 		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			resp.Body.Close()
-			if attempt == 0 {
-				debugf("bb: HTTP %d for %s, retrying once", resp.StatusCode, rawURL)
-				time.Sleep(700 * time.Millisecond)
+			if attempt < maxAttempts {
+				debugf("bb: transport error for %s: %v — retrying", rawURL, err)
+				time.Sleep(500 * time.Millisecond)
 				continue
 			}
+			return nil, err
+		}
+		if (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500) && attempt < maxAttempts {
+			resp.Body.Close()
+			debugf("bb: HTTP %d for %s, retrying", resp.StatusCode, rawURL)
+			time.Sleep(700 * time.Millisecond)
+			continue
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -134,11 +141,35 @@ func (c *bbClient) repoURL(ws, repo, suffix string) string {
 	return fmt.Sprintf("%s/repositories/%s/%s%s", c.base, url.PathEscape(ws), url.PathEscape(repo), suffix)
 }
 
-// listPRs returns the repo's pull requests filtered by state
-// (OPEN | MERGED | DECLINED | SUPERSEDED).
+// listPRFields trims the PR list payload to what the list view renders (the
+// detail view refetches the full PR) — a big win on busy repos, where the
+// untrimmed objects carry descriptions and full participant lists.
+const listPRFields = "next," +
+	"values.id,values.title,values.comment_count,values.updated_on," +
+	"values.author,values.source.branch.name,values.destination.branch.name," +
+	"values.links.html.href"
+
+// listPRsFirstURL builds the first page of the repo's PR list filtered by
+// state (OPEN | MERGED | DECLINED | SUPERSEDED). Follow-up pages come from
+// the `next` link returned by listPRsPage.
+func (c *bbClient) listPRsFirstURL(ws, repo, state string) string {
+	return c.repoURL(ws, repo, "/pullrequests?pagelen=50&state="+url.QueryEscape(state)+
+		"&fields="+url.QueryEscape(listPRFields))
+}
+
+// listPRsPage fetches one page of the PR list; next is "" on the last page.
+func (c *bbClient) listPRsPage(pageURL string) (prs []PullRequest, next string, err error) {
+	var pg page[PullRequest]
+	if err := c.getJSON(pageURL, &pg); err != nil {
+		return nil, "", err
+	}
+	return pg.Values, pg.Next, nil
+}
+
+// listPRs returns every PR for the state (used by `dump prs`; the UI pages
+// on demand via listPRsPage instead).
 func (c *bbClient) listPRs(ws, repo, state string) ([]PullRequest, error) {
-	u := c.repoURL(ws, repo, "/pullrequests?pagelen=50&state="+url.QueryEscape(state))
-	return getAll[PullRequest](c, u, 0)
+	return getAll[PullRequest](c, c.listPRsFirstURL(ws, repo, state), 0)
 }
 
 // getPR returns the full PR detail (participants included).

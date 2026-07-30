@@ -21,25 +21,69 @@ func newListView(a *app) *listView {
 	return v
 }
 
-// load fetches the PR list for the current state filter (unless cached).
+// load fetches the first page of the PR list for the current state filter
+// (unless cached); later pages arrive on demand via loadMore.
 func (v *listView) load(a *app, force bool) {
 	state := a.prsState
 	if !force && a.prs != nil {
 		v.rebuild(a)
 		return
 	}
-	a.prs = nil
-	v.rebuild(a)
+	a.prs, a.prsNext = nil, ""
+	a.prsMoreLoading = false
+	a.prsGen++
+	gen := a.prsGen
+	first := a.client.listPRsFirstURL(a.ctx.Workspace, a.ctx.Repo, state)
+	// fetch bumps a.loading before the rebuild below runs, so the empty
+	// placeholder reads 読み込み中 instead of claiming there are no PRs.
 	a.fetch("prs "+state, func() (func(*app), error) {
-		prs, err := a.client.listPRs(a.ctx.Workspace, a.ctx.Repo, state)
+		prs, next, err := a.client.listPRsPage(first)
 		if err != nil {
 			return nil, err
 		}
 		return func(a *app) {
-			if a.prsState != state {
-				return // the filter moved on while we were fetching
+			if a.prsGen != gen {
+				return // superseded by a reload or state switch
+			}
+			if prs == nil {
+				prs = []PullRequest{} // non-nil marks "loaded, empty"
 			}
 			a.prs = prs
+			a.prsNext = next
+			v.rebuild(a)
+		}, nil
+	})
+	v.rebuild(a)
+}
+
+// loadMore appends the next PR-list page when the cursor nears the end of
+// what's loaded so far.
+func (v *listView) loadMore(a *app) {
+	if a.prsNext == "" || a.prsMoreLoading {
+		return
+	}
+	a.prsMoreLoading = true
+	gen := a.prsGen
+	next := a.prsNext
+	a.fetch("prs more", func() (func(*app), error) {
+		prs, nn, err := a.client.listPRsPage(next)
+		if err != nil {
+			// Clear the in-flight flag ourselves so the next cursor move can
+			// retry; fetch's error path only sets a.status.
+			return func(a *app) {
+				if a.prsGen == gen {
+					a.prsMoreLoading = false
+				}
+				a.status = err.Error()
+			}, nil
+		}
+		return func(a *app) {
+			if a.prsGen != gen {
+				return
+			}
+			a.prsMoreLoading = false
+			a.prs = append(a.prs, prs...)
+			a.prsNext = nn
 			v.rebuild(a)
 		}, nil
 	})
@@ -68,8 +112,12 @@ func (v *listView) rebuild(a *app) {
 			Span{pr.Source.Branch.Name + " → " + pr.Destination.Branch.Name, styleDim},
 		))
 	}
-	if len(a.prs) == 0 && a.loading == 0 {
-		rows = append(rows, textRow(Span{" (" + a.prsState + " のPRはありません)", styleDim}))
+	if len(a.prs) == 0 {
+		if a.loading > 0 {
+			rows = append(rows, textRow(Span{" 読み込み中…", styleDim}))
+		} else {
+			rows = append(rows, textRow(Span{" (" + a.prsState + " のPRはありません)", styleDim}))
+		}
 	}
 	v.vp.Reset(rows)
 }
@@ -84,7 +132,11 @@ func (v *listView) render(a *app, s *Screen) {
 		x = s.WriteString(x, 0, st, style, a.w)
 		x = s.WriteString(x, 0, "  ", styleNone, a.w)
 	}
-	s.WriteString(x, 0, fmt.Sprintf("%d件", len(a.prs)), styleDim, a.w)
+	count := fmt.Sprintf("%d件", len(a.prs))
+	if a.prsNext != "" {
+		count += "+" // more pages on the server, fetched as the cursor nears the end
+	}
+	s.WriteString(x, 0, count, styleDim, a.w)
 	paintSeparator(s, 1, a.w)
 	v.vp.Paint(s, a.contentRect())
 }
@@ -131,6 +183,10 @@ func (v *listView) handle(a *app, k Key) {
 		}
 	case isKey(k, '?'):
 		a.push(helpView{})
+	}
+	// Cursor within ~5 PRs (2 rows each) of the end: prefetch the next page.
+	if a.prsNext != "" && v.vp.Cursor >= len(v.vp.Rows)-10 {
+		v.loadMore(a)
 	}
 }
 

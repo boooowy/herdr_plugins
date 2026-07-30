@@ -44,9 +44,12 @@ type app struct {
 	quit     bool
 	resultCh chan func(*app)
 
-	prs      []PullRequest // list cache for prsState
-	prsState string
-	detail   map[int]*prDetail
+	prs            []PullRequest // list cache for prsState (grows page by page)
+	prsState       string
+	prsNext        string // next PR-list page URL; "" = fully loaded
+	prsGen         int    // list generation; bumped on reload/state switch to drop stale pages
+	prsMoreLoading bool   // a loadMore page is in flight
+	detail         map[int]*prDetail
 
 	difftoolPanes map[int]paneRef // PR id → its external diff tool tab
 

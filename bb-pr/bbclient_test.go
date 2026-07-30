@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,6 +47,40 @@ func TestPaginationFollowsNext(t *testing.T) {
 	}
 }
 
+func TestListPRsPageReturnsNext(t *testing.T) {
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("page") {
+		case "":
+			if f := r.URL.Query().Get("fields"); !strings.Contains(f, "values.title") {
+				t.Errorf("first URL should trim the payload via fields=, got %q", f)
+			}
+			fmt.Fprintf(w, `{"values":[{"id":1},{"id":2}],"next":"%s/2.0/repositories/ws/repo/pullrequests?page=2"}`, srv.URL)
+		case "2":
+			fmt.Fprint(w, `{"values":[{"id":3}]}`)
+		}
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := testClient(srv)
+	prs, next, err := c.listPRsPage(c.listPRsFirstURL("ws", "repo", "OPEN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 2 || prs[0].ID != 1 || next == "" {
+		t.Fatalf("page 1: %d PRs, next=%q", len(prs), next)
+	}
+	prs, next, err = c.listPRsPage(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 1 || prs[0].ID != 3 || next != "" {
+		t.Errorf("page 2: %d PRs, next=%q", len(prs), next)
+	}
+}
+
 func TestDiffFollowsRedirect(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/5/diff", func(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +107,34 @@ func TestRetryOn429(t *testing.T) {
 	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/9", func(w http.ResponseWriter, r *http.Request) {
 		if calls.Add(1) == 1 {
 			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		fmt.Fprint(w, `{"id":9,"title":"ok"}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	pr, err := testClient(srv).getPR("ws", "repo", 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Title != "ok" || calls.Load() != 2 {
+		t.Errorf("pr=%+v calls=%d", pr, calls.Load())
+	}
+}
+
+func TestRetryOnTransportError(t *testing.T) {
+	var calls atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/9", func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			// Kill the connection mid-flight: the client sees a transport
+			// error (EOF), not an HTTP status.
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn.Close()
 			return
 		}
 		fmt.Fprint(w, `{"id":9,"title":"ok"}`)
