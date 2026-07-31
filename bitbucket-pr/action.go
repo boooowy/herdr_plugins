@@ -13,9 +13,9 @@ const pluginID = "boooowy.bitbucket-pr"
 // The viewer's own HERDR_PANE_ID is the viewer pane itself, so everything it
 // needs must travel explicitly.
 const (
-	envWorkspace = "BBPR_WORKSPACE"
-	envRepo      = "BBPR_REPO"
-	envPRID      = "BBPR_PR_ID"
+	envWorkspace = "BITBUCKET_PR_WORKSPACE"
+	envRepo      = "BITBUCKET_PR_REPO"
+	envPRID      = "BITBUCKET_PR_PR_ID"
 )
 
 // runAction is the palette/keybinding/link-handler entrypoint. It runs

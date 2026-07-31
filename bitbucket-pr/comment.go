@@ -16,13 +16,13 @@ import (
 // saved body to Bitbucket when the editor exits.
 
 const (
-	envCommentFile      = "BBPR_COMMENT_FILE"
-	envCommentPath      = "BBPR_COMMENT_PATH"
-	envCommentTo        = "BBPR_COMMENT_TO"
-	envCommentFrom      = "BBPR_COMMENT_FROM"
-	envCommentStartTo   = "BBPR_COMMENT_START_TO"
-	envCommentStartFrom = "BBPR_COMMENT_START_FROM"
-	envCommentParent    = "BBPR_COMMENT_PARENT"
+	envCommentFile      = "BITBUCKET_PR_COMMENT_FILE"
+	envCommentPath      = "BITBUCKET_PR_COMMENT_PATH"
+	envCommentTo        = "BITBUCKET_PR_COMMENT_TO"
+	envCommentFrom      = "BITBUCKET_PR_COMMENT_FROM"
+	envCommentStartTo   = "BITBUCKET_PR_COMMENT_START_TO"
+	envCommentStartFrom = "BITBUCKET_PR_COMMENT_START_FROM"
+	envCommentParent    = "BITBUCKET_PR_COMMENT_PARENT"
 )
 
 // openCommentEditor opens the comment-composer popup. inline anchors a code

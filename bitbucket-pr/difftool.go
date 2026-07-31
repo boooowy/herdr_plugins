@@ -20,10 +20,10 @@ import (
 // is reused per PR; tools watching the patch file (hunk's --watch) reload
 // on rewrite.
 const (
-	envDiffFile   = "BBPR_DIFF_FILE"
-	envHunkTitle  = "BBPR_DIFF_TITLE"
-	envDiffCtx    = "BBPR_DIFF_CTX"    // hunk --agent-context sidecar path
-	envDiffMarker = "BBPR_DIFF_MARKER" // touched after draft notes are posted
+	envDiffFile   = "BITBUCKET_PR_DIFF_FILE"
+	envHunkTitle  = "BITBUCKET_PR_DIFF_TITLE"
+	envDiffCtx    = "BITBUCKET_PR_DIFF_CTX"    // hunk --agent-context sidecar path
+	envDiffMarker = "BITBUCKET_PR_DIFF_MARKER" // touched after draft notes are posted
 )
 
 // paneRef remembers the tab a PR's diff tool runs in, and which file the

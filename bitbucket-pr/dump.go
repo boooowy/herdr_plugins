@@ -10,7 +10,7 @@ import (
 
 // runDump is the dev helper: fetch one API payload and print it to stdout,
 // outside any pane. The repo comes from the cwd's git remote (or
-// BBPR_WORKSPACE/BBPR_REPO in env).
+// BITBUCKET_PR_WORKSPACE/BITBUCKET_PR_REPO in env).
 //
 //	bitbucket-pr dump prs [STATE]
 //	bitbucket-pr dump pr <id>

@@ -74,8 +74,10 @@ PR 更新後に位置がずれたコメント（outdated）は捨てずに、各
 - Go 1.26.4 以上（インストール時の plugin build に使用）
 - Bitbucket Cloud の API トークン（後述）
 - （任意）[hunk](https://github.com/modem-dev/hunk) — デフォルトの外部 diff ビューア。
-  `brew install hunk` または `npm i -g hunkdiff`。`diff_tool` 設定で別ツールに変更可能で、
-  無くても内蔵ビューアだけで動作します。コメント連携（注釈表示 / draft note 投稿）には
+  `brew install hunk` または `npm i -g hunkdiff`。**config.toml を作らなくても
+  Files タブの Enter はデフォルトで hunk を起動します**（`diff_tool` 設定で別ツールに変更可）。
+  未インストールの場合はインストール手順の案内画面が出るだけで、
+  内蔵ビューア（`v`）だけでも一通り使えます。コメント連携（注釈表示 / draft note 投稿）には
   hunk 0.13 以上が必要です
 
 ## インストール
@@ -156,6 +158,10 @@ description = "Bitbucket PR: open viewer for current repo"
 | `q` / `Esc` | 戻る / 終了 |
 
 ## 設定（config.toml、全項目省略可）
+
+設定ファイルは `~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml`。
+**ファイル自体が無くても、以下に示す値がそのままデフォルトとして使われて動作します**
+（外部 diff ツールは hunk、表示は popup 95%×95% など）。
 
 ```toml
 # 認証（未設定なら環境変数 ATLASSIAN_USER_ID / ATLASSIAN_API_TOKEN）
@@ -249,7 +255,3 @@ touch /tmp/bitbucket-pr-debug.log   # 詳細ログ有効化
 ./bin/bitbucket-pr dump pr 482
 ./bin/bitbucket-pr dump diff 482
 ```
-
-`screen.go` / `keys.go` / `debug.go` / `herdr.go` は hint-copy（commit `2029b96` 時点）の
-スナップショットです。hint-copy 側のリファクタ完了後に共有モジュール化する予定のため、
-これらのファイルへの機能追加は最小限にしてください。
