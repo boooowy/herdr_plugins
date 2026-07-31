@@ -108,13 +108,7 @@ API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens
 
 起動方法は3つ:
 
-1. **コマンドパレット** — `Bitbucket PR: open viewer for current repo`。
-   フォーカス中ペインの作業ディレクトリの `git remote origin` からリポジトリを自動判別し、
-   PR 一覧を新しいタブで開きます。
-2. **PR URL を Ctrl+クリック** — ターミナルに流れた
-   `https://bitbucket.org/<ws>/<repo>/pull-requests/<id>` を Ctrl+クリックすると、
-   その PR の詳細を直接開きます。
-3. **キーバインド** — `~/.config/herdr/config.toml` に例えば:
+1. **キーバインド（推奨）** — `~/.config/herdr/config.toml` に例えば:
 
 ```toml
 [[keys.command]]
@@ -124,7 +118,19 @@ command = "boooowy.bitbucket-pr.open"
 description = "Bitbucket PR: open viewer for current repo"
 ```
 
-設定は herdr の再起動、または `herdr server reload-config` で反映されます。
+   設定は herdr の再起動、または `herdr server reload-config` で反映されます。
+   フォーカス中ペインの作業ディレクトリの `git remote origin` からリポジトリを自動判別し、
+   PR 一覧を新しいタブで開きます。
+
+2. **PR URL を Ctrl+クリック** — ターミナルに流れた
+   `https://bitbucket.org/<ws>/<repo>/pull-requests/<id>` を Ctrl+クリックすると、
+   その PR の詳細を直接開きます。
+
+3. **CLI から実行** — キーバインドを設定していないときや動作確認に:
+
+```sh
+herdr plugin action invoke open --plugin boooowy.bitbucket-pr
+```
 
 ## キーバインド（ビューア内。`?` でその画面で使えるキーを表示）
 
