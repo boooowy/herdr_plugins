@@ -155,7 +155,7 @@ func (v *diffView) rebuild(a *app) {
 	addThread := func(t CommentThread) {
 		v.threadFor[t.Root.ID] = t
 		start := len(rows)
-		rows = append(rows, threadRows(t, a.w, now, "")...)
+		rows = append(rows, threadRows(t, a.w, now, t.lineLabel())...)
 		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
 	}
 
@@ -297,7 +297,11 @@ func (v *diffView) tryPendingJump(h int) {
 				v.vp.Cursor = i
 				if h > 0 {
 					v.vp.H = h
-					v.vp.EnsureVisible()
+					// Park the comment near the top with a few rows of code
+					// context above it (like the Comments-tab preview does),
+					// instead of EnsureVisible's bottom-edge minimum scroll.
+					v.vp.Top = max(i-3, 0)
+					v.vp.clampTop()
 					v.pendingJump = 0
 				}
 				return

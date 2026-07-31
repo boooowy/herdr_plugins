@@ -274,6 +274,18 @@ func TestPendingDeleteConfirmFlow(t *testing.T) {
 	}
 }
 
+func TestFooterNamesResolveTargetOnReplyRow(t *testing.T) {
+	a, v := masterViewFixture(t)
+	moveCursorTo(t, v, 2) // thread root
+	if f := v.footer(a); !strings.Contains(f, "s:resolve") || strings.Contains(f, "親を") {
+		t.Errorf("root footer = %q", f)
+	}
+	moveCursorTo(t, v, 4) // reply on thread 2
+	if f := v.footer(a); !strings.Contains(f, "s:親をresolve") {
+		t.Errorf("reply footer = %q", f)
+	}
+}
+
 func TestResolveRejectsGeneralThread(t *testing.T) {
 	a, v := masterViewFixture(t)
 	moveCursorTo(t, v, 1) // general thread root

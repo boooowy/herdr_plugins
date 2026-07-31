@@ -986,13 +986,21 @@ func (v *detailView) footer(a *app) string {
 			base += "Ctrl-d/u:プレビュー  "
 		}
 		sKey := "s:resolve"
-		if t, ok := v.currentThread(); ok && t.Root.Resolved() {
-			sKey = "s:再オープン"
-		}
-		base += "x:削除  " + sKey + "  "
 		if c, t, ok := v.selectedComment(); ok {
+			// On a reply row, name the actual target — resolve always acts
+			// on the thread's parent comment.
+			who := ""
+			if c.ID != t.Root.ID {
+				who = "親を"
+			}
+			if t.Root.Resolved() {
+				sKey = "s:" + who + "再オープン"
+			} else {
+				sKey = "s:" + who + "resolve"
+			}
 			cKey = "C:" + replyTargetFor(c, t)
 		}
+		base += "x:削除  " + sKey + "  "
 	}
 	return base + cKey + "  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
 }

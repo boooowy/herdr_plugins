@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRangeAnchorNewSide(t *testing.T) {
 	lines := []DiffLine{
@@ -64,6 +67,45 @@ func TestAnchorLabelRange(t *testing.T) {
 	})
 	if got := anchorLabel(in); got != "L12–15" {
 		t.Errorf("label = %q", got)
+	}
+}
+
+func TestDiffViewCommentLabelAndJumpPosition(t *testing.T) {
+	a := &app{w: 100, h: 30, detail: map[int]*prDetail{}}
+	d := a.detailFor(7)
+	d.diffstat = []DiffStatEntry{{Status: "modified", New: &struct {
+		Path string `json:"path"`
+	}{Path: "a.go"}}}
+	d.files = []FileDiff{*hunkFixtureFile()}
+	d.comments = masterFixture() // thread 2 anchors a.go L10 (hunk 0, add line)
+
+	v := &diffView{prID: 7, fileIdx: 0, folded: map[int]bool{}, showCmt: true,
+		selAnchor: -1, pendingJump: 2}
+	v.rebuild(a)
+
+	idx := -1
+	for i, r := range v.vp.Rows {
+		if r.Kind == RowComment && r.Selectable {
+			if id, ok := r.Item.(int); ok && id == 2 {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx < 0 {
+		t.Fatal("comment row for thread 2 not found")
+	}
+	// The header carries the anchor label now (parity with the Comments tab).
+	if txt := spansText(v.vp.Rows[idx]); !strings.Contains(txt, "L10") {
+		t.Errorf("comment header = %q, want L10 label", txt)
+	}
+
+	v.tryPendingJump(20)
+	if v.vp.Cursor != idx || v.pendingJump != 0 {
+		t.Errorf("cursor = %d (want %d), pendingJump = %d", v.vp.Cursor, idx, v.pendingJump)
+	}
+	if want := max(idx-3, 0); v.vp.Top != want {
+		t.Errorf("Top = %d, want %d (comment parked near the top)", v.vp.Top, want)
 	}
 }
 
