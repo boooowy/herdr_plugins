@@ -1,0 +1,44 @@
+id = "boooowy.bitbucket-pr"
+name = "Bitbucket PR Viewer"
+version = "0.15.0"
+min_herdr_version = "0.7.0"
+description = "Bitbucket Cloud PR viewer for herdr: list, diff, review comments, and comment posting without leaving the terminal."
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["sh", "scripts/build.sh"]
+
+[[actions]]
+id = "open"
+title = "Bitbucket PR: open viewer for current repo"
+command = ["./bin/bitbucket-pr", "action"]
+
+[[actions]]
+id = "open-url"
+title = "Bitbucket PR: open PR from URL"
+command = ["./bin/bitbucket-pr", "action"]
+
+[[panes]]
+id = "viewer"
+title = "Bitbucket PR"
+placement = "tab"
+command = ["./bin/bitbucket-pr", "ui"]
+
+[[panes]]
+id = "difftool"
+# 実際のタブ名は起動時に tab.rename で config の diff_tab_title に置き換わる
+title = "diff"
+placement = "tab"
+command = ["./bin/bitbucket-pr", "difftool-ui"]
+
+[[panes]]
+id = "comment"
+title = "comment"
+placement = "tab"
+command = ["./bin/bitbucket-pr", "comment-ui"]
+
+[[link_handlers]]
+id = "pr-url"
+title = "Open in PR viewer"
+pattern = "^https://bitbucket\\.org/[^/]+/[^/]+/pull-requests/[0-9]+"
+action = "open-url"
