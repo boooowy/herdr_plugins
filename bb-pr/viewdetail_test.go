@@ -288,6 +288,45 @@ func TestDetailRenderSplitSmoke(t *testing.T) {
 	}
 }
 
+// screenRow reads one rendered row back as a plain string.
+func screenRow(s *Screen, y int) string {
+	var b strings.Builder
+	for x := 0; x < s.W; x++ {
+		if c := s.at(x, y); c.R != 0 {
+			b.WriteRune(c.R)
+		}
+	}
+	return b.String()
+}
+
+func TestTabBadgesShowLoadingUntilFetched(t *testing.T) {
+	a := &app{w: 100, h: 20, detail: map[int]*prDetail{}}
+	d := a.detailFor(1)
+	d.pr = &PullRequest{ID: 1, Title: "title"}
+	v := &detailView{prID: 1}
+
+	// Nothing fetched yet: the badges must not read as 0-file / 0-comment.
+	s := NewScreen(a.w, a.h)
+	v.render(a, s)
+	line := screenRow(s, 2)
+	if !strings.Contains(line, "Files (…)") || !strings.Contains(line, "Comments (…)") {
+		t.Errorf("loading tab bar = %q", line)
+	}
+	if strings.Contains(line, "(0)") {
+		t.Errorf("loading tab bar shows a zero count: %q", line)
+	}
+
+	// Loaded but genuinely empty: real counts appear.
+	d.diffstat = []DiffStatEntry{}
+	d.comments = []Comment{}
+	s = NewScreen(a.w, a.h)
+	v.render(a, s)
+	line = screenRow(s, 2)
+	if !strings.Contains(line, "Files (0)") || !strings.Contains(line, "Comments (0)") {
+		t.Errorf("loaded tab bar = %q", line)
+	}
+}
+
 func TestReplyTarget(t *testing.T) {
 	to := 15
 	inline := CommentThread{Root: mkComment(1, 0, "a.go", nil, &to, false, time.Now())}

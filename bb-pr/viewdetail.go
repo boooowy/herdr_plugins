@@ -94,6 +94,9 @@ func (v *detailView) load(a *app, force bool) {
 			if err != nil {
 				return nil, err
 			}
+			if st == nil {
+				st = []DiffStatEntry{} // nil marks "not loaded" — keep 0 files distinct
+			}
 			return func(a *app) { a.detailFor(id).diffstat = st; v.rebuild(a) }, nil
 		})
 	}
@@ -102,6 +105,9 @@ func (v *detailView) load(a *app, force bool) {
 			cs, err := a.client.comments(a.ctx.Workspace, a.ctx.Repo, id)
 			if err != nil {
 				return nil, err
+			}
+			if cs == nil {
+				cs = []Comment{} // nil marks "not loaded" — keep 0 comments distinct
 			}
 			return func(a *app) {
 				a.detailFor(id).comments = cs
@@ -636,11 +642,19 @@ func (v *detailView) render(a *app, s *Screen) {
 		pr.Author.Name(), relTime(pr.UpdatedOn, time.Now()))
 	s.WriteString(1, 1, truncateWidth(meta, a.w-2), styleDim, a.w)
 
-	// Tab bar.
+	// Tab bar. Counts show "…" until their fetch lands — a flash of
+	// "Files (0)" reads as an empty PR.
+	filesCount, commentsCount := "…", "…"
+	if d.diffstat != nil {
+		filesCount = fmt.Sprintf("%d", len(d.diffstat))
+	}
+	if d.comments != nil {
+		commentsCount = fmt.Sprintf("%d", commentThreadCount(d.comments))
+	}
 	labels := []string{
 		"1:Overview",
-		fmt.Sprintf("2:Files (%d)", len(d.diffstat)),
-		fmt.Sprintf("3:Comments (%d)", commentThreadCount(d.comments)),
+		"2:Files (" + filesCount + ")",
+		"3:Comments (" + commentsCount + ")",
 	}
 	x := 1
 	for i, l := range labels {
