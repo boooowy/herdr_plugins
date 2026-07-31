@@ -26,9 +26,43 @@ type detailView struct {
 	// Comments tab's Enter finds the file/line to jump to in the diff view.
 	inlineThreadFor map[int]CommentThread
 	// threadFor covers every thread (general + inline) for the reply-target
-	// footer; threadSpan is each thread's row range for the focus highlight.
+	// footer; threadSpan is each thread's row range for the focus highlight
+	// (rows of the tab viewport in the flat layout, rows of cmtPreview in
+	// the split layout).
 	threadFor  map[int]CommentThread
 	threadSpan map[int][2]int
+
+	// Comments-tab master-detail split (wide terminals): cmtPreview is the
+	// right-hand read-only pane, cmtPreviewKey names what it currently shows
+	// (a file path, or generalPreviewKey), and cmtFirstThread gives Enter's
+	// jump target when the cursor sits on a file header row.
+	cmtPreview     Viewport
+	cmtPreviewKey  string
+	cmtFirstThread map[string]int
+}
+
+// cmtGroup marks a Comments-tab master-list group header row: a file with
+// inline comments, or (Path == "") the general PR-comment group.
+type cmtGroup struct{ Path string }
+
+// generalPreviewKey is cmtPreviewKey's value for the general PR-comment
+// group ("\x00" cannot appear in a repo path).
+const generalPreviewKey = "\x00general"
+
+// commentsSplit reports whether the Comments tab uses the master-detail
+// split; narrower terminals fall back to the flat single-column list.
+func commentsSplit(a *app) bool { return a.w >= 90 }
+
+// commentMasterWidth is the split's left-pane width.
+func commentMasterWidth(w int) int {
+	lw := w * 38 / 100
+	if lw < 28 {
+		lw = 28
+	}
+	if lw > 52 {
+		lw = 52
+	}
+	return lw
 }
 
 func newDetailView(a *app, id int) *detailView {
@@ -116,7 +150,13 @@ func (v *detailView) rebuild(a *app) {
 	case tabFiles:
 		v.vp[v.tab].Reset(v.fileRows(a, d))
 	case tabComments:
-		v.vp[v.tab].Reset(v.commentRows(a, d))
+		if commentsSplit(a) {
+			v.vp[v.tab].Reset(v.commentMasterRows(a, d))
+			v.cmtPreviewKey = "" // widths/content changed — rebuild the pane
+			v.syncPreview(a)
+		} else {
+			v.vp[v.tab].Reset(v.commentRows(a, d))
+		}
 	}
 }
 
@@ -237,17 +277,18 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 
 	// addThread appends a thread's rows and records its span (sans the
 	// trailing gap row) for the focus highlight.
-	addThread := func(t CommentThread, label string) {
+	addThread := func(rows []Row, t CommentThread, label string) []Row {
 		v.threadFor[t.Root.ID] = t
 		start := len(rows)
 		rows = append(rows, threadRows(t, a.w, now, label)...)
 		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
+		return rows
 	}
 
 	if len(general) > 0 {
 		section(fmt.Sprintf("PR コメント (%d)", len(general)))
 		for _, t := range general {
-			addThread(t, "")
+			rows = addThread(rows, t, "")
 		}
 	}
 	if inlineTotal > 0 {
@@ -258,34 +299,198 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 			for _, t := range threads {
 				v.inlineThreadFor[t.Root.ID] = t
 			}
-			// Commented hunks render diff-view style — full hunk context with
-			// each thread right under its anchor line. Hunks without comments
-			// are skipped; unanchorable threads (outdated, truncated diff, or
-			// the diff not loaded yet) fall back to the flat layout below.
-			f := fileDiffFor(d.files, path)
-			anchored, orphans := anchorThreads(f, threads)
-			if f != nil {
-				for hi := range f.Hunks {
-					n := hunkCommentCount(anchored, hi)
-					if n == 0 {
-						continue
-					}
-					rows = append(rows, commentHunkHeader(&f.Hunks[hi], n, a.w))
-					for li, l := range f.Hunks[hi].Lines {
-						rows = append(rows, unselectableRows(diffLineRows(l, 4, a.w, false))...)
-						for _, t := range anchored[[2]int{hi, li}] {
-							addThread(t, t.lineLabel())
-						}
-					}
-					rows = append(rows, textRow())
-				}
-			}
-			for _, t := range orphans {
-				addThread(t, t.lineLabel())
-			}
+			rows = appendFileCommentRows(rows, fileDiffFor(d.files, path), threads, a.w, addThread)
 		}
 	}
 	return rows
+}
+
+// appendFileCommentRows renders one file's comment section: commented hunks
+// diff-view style — full hunk context with each thread right under its
+// anchor line. Hunks without comments are skipped; unanchorable threads
+// (outdated, truncated diff, or the diff not loaded yet) land flat at the
+// end. addThread appends one thread's rows and does the caller's
+// bookkeeping (spans, selectability).
+func appendFileCommentRows(rows []Row, f *FileDiff, threads []CommentThread, width int,
+	addThread func([]Row, CommentThread, string) []Row) []Row {
+	anchored, orphans := anchorThreads(f, threads)
+	if f != nil {
+		for hi := range f.Hunks {
+			n := hunkCommentCount(anchored, hi)
+			if n == 0 {
+				continue
+			}
+			rows = append(rows, commentHunkHeader(&f.Hunks[hi], n, width))
+			for li, l := range f.Hunks[hi].Lines {
+				rows = append(rows, unselectableRows(diffLineRows(l, 4, width, false))...)
+				for _, t := range anchored[[2]int{hi, li}] {
+					rows = addThread(rows, t, t.lineLabel())
+				}
+			}
+			rows = append(rows, textRow())
+		}
+	}
+	for _, t := range orphans {
+		rows = addThread(rows, t, t.lineLabel())
+	}
+	return rows
+}
+
+// commentMasterRows builds the split layout's left list: group headers
+// (PR comments / one per file) with their threads indented underneath.
+func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
+	var rows []Row
+	general := generalThreads(d.comments)
+	byFile := inlineThreadsByFile(d.comments)
+	v.inlineThreadFor = map[int]CommentThread{}
+	v.threadFor = map[int]CommentThread{}
+	v.cmtFirstThread = map[string]int{}
+	width := commentMasterWidth(a.w)
+
+	inlineTotal := 0
+	for _, ts := range byFile {
+		inlineTotal += len(ts)
+	}
+	if len(general) == 0 && inlineTotal == 0 {
+		if a.loading == 0 {
+			rows = append(rows, textRow(Span{" (コメントはありません)", styleDim}))
+		}
+		return rows
+	}
+
+	if len(general) > 0 {
+		rows = append(rows, row(RowFile, cmtGroup{}, true,
+			Span{" 💬 ", styleNone},
+			Span{fmt.Sprintf("PR コメント (%d)", len(general)), styleTitle}))
+		for _, t := range general {
+			v.threadFor[t.Root.ID] = t
+			rows = append(rows, masterThreadRow(t, width))
+		}
+		rows = append(rows, textRow())
+	}
+	for _, path := range orderedInlinePaths(byFile) {
+		threads := byFile[path]
+		v.cmtFirstThread[path] = threads[0].Root.ID
+		rows = append(rows, row(RowFile, cmtGroup{Path: path}, true,
+			Span{" 📄 ", styleNone},
+			Span{truncateWidth(path, width-5), styleTitle}))
+		for _, t := range threads {
+			v.threadFor[t.Root.ID] = t
+			v.inlineThreadFor[t.Root.ID] = t
+			rows = append(rows, masterThreadRow(t, width))
+		}
+		rows = append(rows, textRow())
+	}
+	return rows
+}
+
+// masterThreadRow is one left-pane thread line: "   L46 tanaka 「抜粋…」".
+func masterThreadRow(t CommentThread, width int) Row {
+	spans := []Span{{"   ", styleNone}}
+	if label := t.lineLabel(); label != "" {
+		st := styleMeta
+		if t.Root.Inline != nil && t.Root.Inline.Outdated {
+			st = styleOutdated
+		}
+		spans = append(spans, Span{label + " ", st})
+	}
+	spans = append(spans, Span{t.Root.User.Name(), styleAuthor})
+	used := 0
+	for _, sp := range spans {
+		used += displayWidth(sp.Text)
+	}
+	// " 「" + excerpt + "」" needs 6 cells of frame; skip when too tight.
+	if w := width - used - 6; w > 1 {
+		spans = append(spans, Span{" 「" + truncateWidth(commentExcerpt(t.Root), w) + "」", styleDim})
+	}
+	return row(RowComment, t.Root.ID, true, spans...)
+}
+
+// commentExcerpt is the first non-empty body line, for one-line lists.
+func commentExcerpt(c Comment) string {
+	if c.Deleted {
+		return "(deleted comment)"
+	}
+	for _, line := range strings.Split(c.Content.Raw, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+// commentDetailRows builds the right-hand preview for one master entry:
+// the general threads, or one file's hunk-context comment view. Every row
+// is unselectable — the pane only scrolls (Ctrl-d/u), focus stays left.
+func (v *detailView) commentDetailRows(a *app, d *prDetail, key string, width int) []Row {
+	var rows []Row
+	now := time.Now()
+	v.threadSpan = map[int][2]int{}
+	addThread := func(rows []Row, t CommentThread, label string) []Row {
+		start := len(rows)
+		rows = append(rows, unselectableRows(threadRows(t, width, now, label))...)
+		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
+		return rows
+	}
+
+	if key == generalPreviewKey {
+		rows = append(rows, textRow(Span{" 💬 ", styleNone}, Span{"PR コメント", styleTitle}), textRow())
+		for _, t := range generalThreads(d.comments) {
+			rows = addThread(rows, t, "")
+		}
+		return rows
+	}
+	rows = append(rows, textRow(Span{" 📄 ", styleNone}, Span{truncateWidth(key, width-5), styleTitle}), textRow())
+	return appendFileCommentRows(rows, fileDiffFor(d.files, key),
+		inlineThreadsByFile(d.comments)[key], width, addThread)
+}
+
+// syncPreview aligns the right pane with the master cursor: rebuilds it
+// when the selected group changes, and scrolls the selected thread into
+// view (render tints its rows via threadSpan).
+func (v *detailView) syncPreview(a *app) {
+	if v.tab != tabComments || !commentsSplit(a) {
+		return
+	}
+	key, rootID := "", 0
+	if r := v.vp[tabComments].Current(); r != nil {
+		switch it := r.Item.(type) {
+		case cmtGroup:
+			if it.Path == "" {
+				key = generalPreviewKey
+			} else {
+				key = it.Path
+			}
+		case int:
+			if t, ok := v.threadFor[it]; ok {
+				rootID = it
+				if t.Root.Inline != nil {
+					key = t.Root.Inline.Path
+				} else {
+					key = generalPreviewKey
+				}
+			}
+		}
+	}
+	if key == "" {
+		v.cmtPreview = Viewport{}
+		v.cmtPreviewKey = ""
+		return
+	}
+	if key != v.cmtPreviewKey {
+		d := a.detailFor(v.prID)
+		v.cmtPreview = Viewport{}
+		v.cmtPreview.Reset(v.commentDetailRows(a, d, key, a.w-commentMasterWidth(a.w)-1))
+		v.cmtPreviewKey = key
+	}
+	if rootID != 0 {
+		if span, ok := v.threadSpan[rootID]; ok {
+			v.cmtPreview.Top = max(span[0]-1, 0)
+			v.cmtPreview.clampTop()
+		}
+	} else {
+		v.cmtPreview.Top = 0
+	}
 }
 
 // fileDiffFor finds the parsed diff for path (nil when the diff is still
@@ -449,12 +654,34 @@ func (v *detailView) render(a *app, s *Screen) {
 	paintSeparator(s, 3, a.w)
 
 	rect := Rect{X: 0, Y: 4, W: a.w, H: a.h - 5}
+	if v.tab == tabComments && commentsSplit(a) {
+		leftW := commentMasterWidth(a.w)
+		left := Rect{X: 0, Y: rect.Y, W: leftW, H: rect.H}
+		right := Rect{X: leftW + 1, Y: rect.Y, W: a.w - leftW - 1, H: rect.H}
+		v.vp[v.tab].Paint(s, left)
+		paintVSeparator(s, leftW, rect.Y, rect.Y+rect.H-1)
+		v.cmtPreview.Paint(s, right)
+		// The reply-target thread lights up so C never posts somewhere invisible.
+		if t, ok := v.currentThread(); ok {
+			if span, ok := v.threadSpan[t.Root.ID]; ok {
+				focusViewportRows(s, &v.cmtPreview, right, span[0], span[1])
+			}
+		}
+		return
+	}
 	v.vp[v.tab].Paint(s, rect)
 	// The reply-target thread lights up so C never posts somewhere invisible.
 	if t, ok := v.currentThread(); ok {
 		if span, ok := v.threadSpan[t.Root.ID]; ok {
 			focusViewportRows(s, &v.vp[v.tab], rect, span[0], span[1])
 		}
+	}
+}
+
+// paintVSeparator draws a vertical │ column from y0 to y1 (inclusive).
+func paintVSeparator(s *Screen, x, y0, y1 int) {
+	for y := y0; y <= y1; y++ {
+		s.Set(x, y, '│', styleDim)
 	}
 }
 
@@ -499,26 +726,38 @@ func (v *detailView) handle(a *app, k Key) {
 		} else {
 			vp.Scroll(1)
 		}
+		v.syncPreview(a)
 	case isKey(k, 'k') || k.Kind == KeyUp:
 		if vp.Cursor >= 0 {
 			vp.MoveCursor(-1)
 		} else {
 			vp.Scroll(-1)
 		}
+		v.syncPreview(a)
 	case k.Kind == KeyCtrl && k.R == 'd':
-		vp.Scroll(vp.H / 2)
+		if v.tab == tabComments && commentsSplit(a) {
+			v.cmtPreview.Scroll(v.cmtPreview.H / 2)
+		} else {
+			vp.Scroll(vp.H / 2)
+		}
 	case k.Kind == KeyCtrl && k.R == 'u':
-		vp.Scroll(-vp.H / 2)
+		if v.tab == tabComments && commentsSplit(a) {
+			v.cmtPreview.Scroll(-v.cmtPreview.H / 2)
+		} else {
+			vp.Scroll(-vp.H / 2)
+		}
 	case isKey(k, 'g'):
 		vp.Top = 0
 		if i := vp.nextSelectable(0, 1); i >= 0 {
 			vp.Cursor = i
 		}
+		v.syncPreview(a)
 	case isKey(k, 'G'):
 		if i := vp.nextSelectable(len(vp.Rows)-1, -1); i >= 0 {
 			vp.Cursor = i
 			vp.EnsureVisible()
 		}
+		v.syncPreview(a)
 	case k.Kind == KeyEnter:
 		switch v.tab {
 		case tabFiles:
@@ -531,9 +770,16 @@ func (v *detailView) handle(a *app, k Key) {
 				}
 			}
 		case tabComments:
-			if r := vp.Current(); r != nil && r.Kind == RowComment {
-				if id, ok := r.Item.(int); ok {
-					v.openCommentInDiff(a, id)
+			if r := vp.Current(); r != nil {
+				switch it := r.Item.(type) {
+				case int:
+					v.openCommentInDiff(a, it)
+				case cmtGroup:
+					// A file header jumps to its first (newest) thread; the
+					// general group has no code to jump to.
+					if id, ok := v.cmtFirstThread[it.Path]; ok {
+						v.openCommentInDiff(a, id)
+					}
 				}
 			}
 		}
@@ -564,7 +810,15 @@ func (v *detailView) handle(a *app, k Key) {
 		}
 	case isKey(k, 'C'):
 		// Reply when the cursor is on a Comments-tab thread, otherwise a new
-		// general PR comment.
+		// general PR comment. A file header is ambiguous — ask for a thread.
+		if v.tab == tabComments {
+			if r := vp.Current(); r != nil {
+				if g, ok := r.Item.(cmtGroup); ok && g.Path != "" {
+					a.status = "返信するスレッドを j/k で選択してください"
+					return
+				}
+			}
+		}
 		parent, target := 0, ""
 		if t, ok := v.currentThread(); ok {
 			parent = t.Root.ID
@@ -590,6 +844,9 @@ func (v *detailView) footer(a *app) string {
 	cKey := "C:コメント"
 	if v.tab == tabComments {
 		base += "Enter:コードへ  "
+		if commentsSplit(a) {
+			base += "Ctrl-d/u:プレビュー  "
+		}
 		if t, ok := v.currentThread(); ok {
 			cKey = "C:" + replyTarget(t)
 		}

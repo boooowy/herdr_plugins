@@ -25,8 +25,9 @@ var helpByCtx = map[string]struct {
 	"detail": {"PR詳細", []helpLine{
 		{"Tab / Shift-Tab / 1-3", "タブ切替 (Overview/Files/Comments)"},
 		{"l / h  (→/←)", "タブ切替 (次 / 前)"},
-		{"j / k / ↑ / ↓", "移動"},
+		{"j / k / ↑ / ↓", "移動 (Comments: 左リスト移動、右にプレビュー)"},
 		{"Enter", "Files: diffツールで開く / Comments: コードへジャンプ"},
+		{"Ctrl-d / Ctrl-u", "Comments: 右プレビューをスクロール"},
 		{"v", "内蔵diffビューアで開く (Filesタブ)"},
 		{"C", "コメント投稿 (Comments のスレッド上では返信)"},
 		{"D", "PR全体のdiffをdiffツールで開く"},
