@@ -5,11 +5,18 @@ import (
 	"sort"
 )
 
-// CommentThread is one root comment with its replies flattened in
-// chronological order (nested replies land under the same root).
+// Reply is one reply inside a thread with its nesting depth (1 = a direct
+// reply to the root, 2 = a reply to that reply, …).
+type Reply struct {
+	Comment
+	Depth int
+}
+
+// CommentThread is one root comment with its replies in thread-tree order:
+// depth-first, siblings chronological.
 type CommentThread struct {
 	Root    Comment
-	Replies []Comment
+	Replies []Reply
 }
 
 // buildThreads groups comments into threads. keep filters which ROOT
@@ -34,6 +41,7 @@ func buildThreads(comments []Comment, keep func(*Comment) bool) []CommentThread 
 	}
 
 	threads := map[int]*CommentThread{}
+	children := map[int][]*Comment{} // parent ID → direct replies
 	var order []int
 	for i := range comments {
 		c := &comments[i]
@@ -41,20 +49,43 @@ func buildThreads(comments []Comment, keep func(*Comment) bool) []CommentThread 
 		if keep != nil && !keep(root) {
 			continue
 		}
-		t, ok := threads[root.ID]
-		if !ok {
-			t = &CommentThread{Root: *root}
-			threads[root.ID] = t
+		if _, ok := threads[root.ID]; !ok {
+			threads[root.ID] = &CommentThread{Root: *root}
 			order = append(order, root.ID)
 		}
 		if c.ID != root.ID {
-			t.Replies = append(t.Replies, *c)
+			// A reply whose direct parent is unknown hangs off the root.
+			parent := root.ID
+			if c.Parent != nil {
+				if _, ok := byID[c.Parent.ID]; ok {
+					parent = c.Parent.ID
+				}
+			}
+			children[parent] = append(children[parent], c)
+		}
+	}
+	for _, cs := range children {
+		sort.SliceStable(cs, func(i, j int) bool {
+			return cs[i].CreatedOn.Before(cs[j].CreatedOn)
+		})
+	}
+
+	// walk emits a comment's replies depth-first, siblings chronological.
+	var walk func(t *CommentThread, id, depth int)
+	walk = func(t *CommentThread, id, depth int) {
+		if depth > 100 {
+			return // malformed cycle guard (mirrors rootOf's hop bound)
+		}
+		for _, c := range children[id] {
+			t.Replies = append(t.Replies, Reply{Comment: *c, Depth: depth})
+			walk(t, c.ID, depth+1)
 		}
 	}
 
 	out := make([]CommentThread, 0, len(order))
 	for _, id := range order {
 		t := threads[id]
+		walk(t, id, 1)
 		// Fully-deleted threads are tombstone noise; a deleted root with
 		// live replies stays for context.
 		alive := !t.Root.Deleted
@@ -64,12 +95,9 @@ func buildThreads(comments []Comment, keep func(*Comment) bool) []CommentThread 
 		if !alive {
 			continue
 		}
-		sort.SliceStable(t.Replies, func(i, j int) bool {
-			return t.Replies[i].CreatedOn.Before(t.Replies[j].CreatedOn)
-		})
 		out = append(out, *t)
 	}
-	// Newest thread first (replies inside a thread stay chronological).
+	// Newest thread first (replies inside a thread stay in tree order).
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].Root.CreatedOn.After(out[j].Root.CreatedOn)
 	})

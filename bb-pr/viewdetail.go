@@ -39,6 +39,16 @@ type detailView struct {
 	cmtPreview     Viewport
 	cmtPreviewKey  string
 	cmtFirstThread map[string]int
+
+	// Reply rows are selectable too: replyRoot maps a reply ID to its thread
+	// root, commentFor maps any selectable comment ID (root or reply) to the
+	// comment itself (C reply target, x delete target).
+	replyRoot  map[int]int
+	commentFor map[int]Comment
+
+	// pendingDelete is a comment ID waiting for the y-key confirmation of
+	// `x` (0 = none).
+	pendingDelete int
 }
 
 // cmtGroup marks a Comments-tab master-list group header row: a file with
@@ -261,6 +271,8 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	v.inlineThreadFor = map[int]CommentThread{}
 	v.threadFor = map[int]CommentThread{}
 	v.threadSpan = map[int][2]int{}
+	v.replyRoot = nil // flat layout: only thread roots are selectable
+	v.commentFor = nil
 
 	inlineTotal := 0
 	for _, ts := range byFile {
@@ -351,6 +363,8 @@ func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 	v.inlineThreadFor = map[int]CommentThread{}
 	v.threadFor = map[int]CommentThread{}
 	v.cmtFirstThread = map[string]int{}
+	v.replyRoot = map[int]int{}
+	v.commentFor = map[int]Comment{}
 	width := commentMasterWidth(a.w)
 
 	inlineTotal := 0
@@ -364,13 +378,25 @@ func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 		return rows
 	}
 
+	// addThreadRows lists one thread: its root line then every reply,
+	// nested by depth — all selectable.
+	addThreadRows := func(t CommentThread) {
+		v.threadFor[t.Root.ID] = t
+		v.commentFor[t.Root.ID] = t.Root
+		rows = append(rows, masterThreadRow(t, width))
+		for _, r := range t.Replies {
+			v.replyRoot[r.ID] = t.Root.ID
+			v.commentFor[r.ID] = r.Comment
+			rows = append(rows, masterReplyRow(r, width))
+		}
+	}
+
 	if len(general) > 0 {
 		rows = append(rows, row(RowFile, cmtGroup{}, true,
 			Span{" 💬 ", styleNone},
 			Span{fmt.Sprintf("PR コメント (%d)", len(general)), styleTitle}))
 		for _, t := range general {
-			v.threadFor[t.Root.ID] = t
-			rows = append(rows, masterThreadRow(t, width))
+			addThreadRows(t)
 		}
 		rows = append(rows, textRow())
 	}
@@ -381,9 +407,8 @@ func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 			Span{" 📄 ", styleNone},
 			Span{truncateWidth(path, width-5), styleTitle}))
 		for _, t := range threads {
-			v.threadFor[t.Root.ID] = t
 			v.inlineThreadFor[t.Root.ID] = t
-			rows = append(rows, masterThreadRow(t, width))
+			addThreadRows(t)
 		}
 		rows = append(rows, textRow())
 	}
@@ -401,15 +426,36 @@ func masterThreadRow(t CommentThread, width int) Row {
 		spans = append(spans, Span{label + " ", st})
 	}
 	spans = append(spans, Span{t.Root.User.Name(), styleAuthor})
+	if t.Root.Resolved() {
+		spans = append(spans, Span{" ✓", styleApproved})
+	}
+	spans = appendExcerptSpan(spans, t.Root, width)
+	return row(RowComment, t.Root.ID, true, spans...)
+}
+
+// masterReplyRow is one left-pane reply line: "     ↳ suzuki 「抜粋…」",
+// shifted right by nesting depth.
+func masterReplyRow(r Reply, width int) Row {
+	indent := "     " + strings.Repeat("  ", r.Depth-1)
+	spans := []Span{
+		{indent + "↳ ", styleDim},
+		{r.User.Name(), styleAuthor},
+	}
+	spans = appendExcerptSpan(spans, r.Comment, width)
+	return row(RowComment, r.ID, true, spans...)
+}
+
+// appendExcerptSpan adds the 「…」 body excerpt when the remaining width
+// allows it (" 「" + excerpt + "」" needs 6 cells of frame).
+func appendExcerptSpan(spans []Span, c Comment, width int) []Span {
 	used := 0
 	for _, sp := range spans {
 		used += displayWidth(sp.Text)
 	}
-	// " 「" + excerpt + "」" needs 6 cells of frame; skip when too tight.
 	if w := width - used - 6; w > 1 {
-		spans = append(spans, Span{" 「" + truncateWidth(commentExcerpt(t.Root), w) + "」", styleDim})
+		spans = append(spans, Span{" 「" + truncateWidth(commentExcerpt(c), w) + "」", styleDim})
 	}
-	return row(RowComment, t.Root.ID, true, spans...)
+	return spans
 }
 
 // commentExcerpt is the first non-empty body line, for one-line lists.
@@ -468,8 +514,12 @@ func (v *detailView) syncPreview(a *app) {
 				key = it.Path
 			}
 		case int:
-			if t, ok := v.threadFor[it]; ok {
-				rootID = it
+			id := it
+			if root, ok := v.replyRoot[id]; ok {
+				id = root // a reply scrolls to its thread
+			}
+			if t, ok := v.threadFor[id]; ok {
+				rootID = id
 				if t.Root.Inline != nil {
 					key = t.Root.Inline.Path
 				} else {
@@ -536,7 +586,8 @@ func unselectableRows(rows []Row) []Row {
 	return rows
 }
 
-// currentThread returns the thread under the Comments-tab cursor.
+// currentThread returns the thread under the Comments-tab cursor (a cursor
+// on a reply row resolves to its enclosing thread).
 func (v *detailView) currentThread() (CommentThread, bool) {
 	if v.tab != tabComments {
 		return CommentThread{}, false
@@ -549,8 +600,26 @@ func (v *detailView) currentThread() (CommentThread, bool) {
 	if !ok {
 		return CommentThread{}, false
 	}
+	if root, ok := v.replyRoot[id]; ok {
+		id = root
+	}
 	t, ok := v.threadFor[id]
 	return t, ok
+}
+
+// selectedComment returns the exact comment under the Comments-tab cursor —
+// a thread root or an individual reply — plus its thread.
+func (v *detailView) selectedComment() (Comment, CommentThread, bool) {
+	t, ok := v.currentThread()
+	if !ok {
+		return Comment{}, CommentThread{}, false
+	}
+	if id, ok := v.vp[v.tab].Current().Item.(int); ok {
+		if c, ok := v.commentFor[id]; ok {
+			return c, t, true
+		}
+	}
+	return t.Root, t, true // flat layout: only roots are selectable
 }
 
 // orderedInlinePaths sorts the inline-comment files so the one holding the
@@ -710,8 +779,32 @@ func stateStyle(state string) StyleID {
 	}
 }
 
+// interceptEsc cancels a pending x-delete instead of popping the view.
+func (v *detailView) interceptEsc(a *app) bool {
+	if v.pendingDelete == 0 {
+		return false
+	}
+	v.pendingDelete = 0
+	a.status = "削除を取り消しました"
+	return true
+}
+
 func (v *detailView) handle(a *app, k Key) {
 	vp := &v.vp[v.tab]
+	// A pending x-delete consumes the next key: y confirms, anything else
+	// cancels.
+	if v.pendingDelete != 0 {
+		id := v.pendingDelete
+		v.pendingDelete = 0
+		if isKey(k, 'y') {
+			v.runCommentAction(a, "コメントを削除しました", func(cl *bbClient) error {
+				return cl.deleteComment(a.ctx.Workspace, a.ctx.Repo, v.prID, id)
+			})
+		} else {
+			a.status = "削除を取り消しました"
+		}
+		return
+	}
 	switch {
 	case k.Kind == KeyTab || (k.Kind == KeyRune && k.R == '\t'):
 		v.tab = (v.tab + 1) % tabCount
@@ -787,6 +880,9 @@ func (v *detailView) handle(a *app, k Key) {
 			if r := vp.Current(); r != nil {
 				switch it := r.Item.(type) {
 				case int:
+					if root, ok := v.replyRoot[it]; ok {
+						it = root // a reply jumps to its thread
+					}
 					v.openCommentInDiff(a, it)
 				case cmtGroup:
 					// A file header jumps to its first (newest) thread; the
@@ -823,8 +919,9 @@ func (v *detailView) handle(a *app, k Key) {
 			copyToClipboard(a, d.pr.Source.Branch.Name)
 		}
 	case isKey(k, 'C'):
-		// Reply when the cursor is on a Comments-tab thread, otherwise a new
-		// general PR comment. A file header is ambiguous — ask for a thread.
+		// Reply to the exact comment under the Comments-tab cursor (a reply
+		// row nests under that reply), otherwise a new general PR comment.
+		// A file header is ambiguous — ask for a thread.
 		if v.tab == tabComments {
 			if r := vp.Current(); r != nil {
 				if g, ok := r.Item.(cmtGroup); ok && g.Path != "" {
@@ -834,11 +931,38 @@ func (v *detailView) handle(a *app, k Key) {
 			}
 		}
 		parent, target := 0, ""
-		if t, ok := v.currentThread(); ok {
-			parent = t.Root.ID
-			target = replyTarget(t)
+		if c, t, ok := v.selectedComment(); ok {
+			parent = c.ID
+			target = replyTargetFor(c, t)
 		}
 		openCommentEditor(a, v.prID, nil, parent, target)
+	case isKey(k, 'x') && v.tab == tabComments:
+		if c, _, ok := v.selectedComment(); ok {
+			if c.Deleted {
+				a.status = "削除済みコメントです"
+			} else {
+				v.pendingDelete = c.ID
+				a.status = fmt.Sprintf("%s のコメントを削除しますか？ y で確定 / 他キーで取消", c.User.Name())
+			}
+		}
+	case isKey(k, 's') && v.tab == tabComments:
+		// Resolve toggles on the thread root; the API only accepts inline
+		// (diff) threads.
+		if _, t, ok := v.selectedComment(); ok {
+			root := t.Root
+			switch {
+			case root.Inline == nil:
+				a.status = "一般コメントは resolve できません（インラインスレッドのみ）"
+			case root.Resolved():
+				v.runCommentAction(a, "スレッドを再オープンしました", func(cl *bbClient) error {
+					return cl.unresolveComment(a.ctx.Workspace, a.ctx.Repo, v.prID, root.ID)
+				})
+			default:
+				v.runCommentAction(a, "スレッドを resolve しました", func(cl *bbClient) error {
+					return cl.resolveComment(a.ctx.Workspace, a.ctx.Repo, v.prID, root.ID)
+				})
+			}
+		}
 	case isKey(k, 'D'):
 		openInDiffTool(a, v.prID, "")
 	case isKey(k, '?'):
@@ -861,8 +985,13 @@ func (v *detailView) footer(a *app) string {
 		if commentsSplit(a) {
 			base += "Ctrl-d/u:プレビュー  "
 		}
-		if t, ok := v.currentThread(); ok {
-			cKey = "C:" + replyTarget(t)
+		sKey := "s:resolve"
+		if t, ok := v.currentThread(); ok && t.Root.Resolved() {
+			sKey = "s:再オープン"
+		}
+		base += "x:削除  " + sKey + "  "
+		if c, t, ok := v.selectedComment(); ok {
+			cKey = "C:" + replyTargetFor(c, t)
 		}
 	}
 	return base + cKey + "  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
@@ -870,11 +999,35 @@ func (v *detailView) footer(a *app) string {
 
 // replyTarget names where a reply will land: "返信→tanaka L15".
 func replyTarget(t CommentThread) string {
-	s := "返信→" + t.Root.User.Name()
+	return replyTargetFor(t.Root, t)
+}
+
+// replyTargetFor is replyTarget for a specific comment inside the thread
+// (nested replies name the reply's author, not the root's).
+func replyTargetFor(c Comment, t CommentThread) string {
+	s := "返信→" + c.User.Name()
 	if label := t.lineLabel(); label != "" {
 		s += " " + label
 	}
 	return s
+}
+
+// runCommentAction fires one comment mutation (delete / resolve / reopen)
+// off the main loop and refetches the PR's comments on success — the same
+// reload path the comment editor uses.
+func (v *detailView) runCommentAction(a *app, okMsg string, call func(*bbClient) error) {
+	prID := v.prID
+	client := a.client
+	a.fetch(fmt.Sprintf("comment action %d", prID), func() (func(*app), error) {
+		if err := call(client); err != nil {
+			return nil, err
+		}
+		return func(a *app) {
+			a.status = okMsg
+			a.detailFor(prID).comments = nil
+			v.load(a, false) // refetches only the comments
+		}, nil
+	})
 }
 
 func joinComma(names []string) string {

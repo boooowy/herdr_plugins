@@ -103,13 +103,14 @@ func TestCommentMasterWidth(t *testing.T) {
 }
 
 // masterFixture: one general thread (id 1) plus inline threads in a.go
-// (id 2, newest) and b.go (id 3).
+// (id 2, newest, with reply id 4) and b.go (id 3).
 func masterFixture() []Comment {
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	return []Comment{
 		mkComment(1, 0, "", nil, nil, false, base),
 		mkComment(2, 0, "a.go", nil, iptr(10), false, base.Add(2*time.Hour)),
 		mkComment(3, 0, "b.go", nil, iptr(5), false, base.Add(time.Hour)),
+		mkComment(4, 2, "", nil, nil, false, base.Add(3*time.Hour)), // reply on thread 2
 	}
 }
 
@@ -119,9 +120,9 @@ func TestCommentMasterRows(t *testing.T) {
 	v := &detailView{}
 	rows := v.commentMasterRows(a, d)
 
-	// [0] general header, [1] thread 1, [2] gap,
-	// [3] a.go header, [4] thread 2, [5] gap, [6] b.go header, [7] thread 3.
-	if len(rows) < 8 {
+	// [0] general header, [1] thread 1, [2] gap, [3] a.go header,
+	// [4] thread 2, [5] reply 4, [6] gap, [7] b.go header, [8] thread 3.
+	if len(rows) < 9 {
 		t.Fatalf("got %d rows", len(rows))
 	}
 	if g, ok := rows[0].Item.(cmtGroup); !ok || g.Path != "" || !rows[0].Selectable {
@@ -133,14 +134,26 @@ func TestCommentMasterRows(t *testing.T) {
 	if g, ok := rows[3].Item.(cmtGroup); !ok || g.Path != "a.go" {
 		t.Errorf("first file header = %+v", rows[3])
 	}
-	if g, ok := rows[6].Item.(cmtGroup); !ok || g.Path != "b.go" {
-		t.Errorf("second file header = %+v", rows[6])
+	if id, ok := rows[5].Item.(int); !ok || id != 4 || !rows[5].Selectable {
+		t.Errorf("reply row = %+v", rows[5])
+	}
+	if !strings.Contains(spansText(rows[5]), "↳") {
+		t.Errorf("reply row text = %q", spansText(rows[5]))
+	}
+	if g, ok := rows[7].Item.(cmtGroup); !ok || g.Path != "b.go" {
+		t.Errorf("second file header = %+v", rows[7])
 	}
 	if v.cmtFirstThread["a.go"] != 2 || v.cmtFirstThread["b.go"] != 3 {
 		t.Errorf("cmtFirstThread = %v", v.cmtFirstThread)
 	}
 	if len(v.threadFor) != 3 || len(v.inlineThreadFor) != 2 {
 		t.Errorf("threadFor=%d inlineThreadFor=%d", len(v.threadFor), len(v.inlineThreadFor))
+	}
+	if v.replyRoot[4] != 2 {
+		t.Errorf("replyRoot = %v", v.replyRoot)
+	}
+	if len(v.commentFor) != 4 {
+		t.Errorf("commentFor = %v", v.commentFor)
 	}
 }
 
@@ -176,6 +189,101 @@ func spansText(r Row) string {
 		s += sp.Text
 	}
 	return s
+}
+
+func TestMasterReplyRowIndentByDepth(t *testing.T) {
+	r := Reply{Comment: mkComment(9, 2, "", nil, nil, false, time.Now()), Depth: 1}
+	r.User.DisplayName = "suzuki"
+	r.Content.Raw = "対応します"
+	d1 := spansText(masterReplyRow(r, 50))
+	r.Depth = 2
+	d2 := spansText(masterReplyRow(r, 50))
+	if !strings.HasPrefix(d1, "     ↳ ") || !strings.HasPrefix(d2, "       ↳ ") {
+		t.Errorf("indents: depth1=%q depth2=%q", d1, d2)
+	}
+	if !strings.Contains(d1, "suzuki") || !strings.Contains(d1, "「対応します」") {
+		t.Errorf("reply row = %q", d1)
+	}
+	row := masterReplyRow(r, 50)
+	if !row.Selectable || row.Kind != RowComment || row.Item.(int) != 9 {
+		t.Errorf("reply row meta = %+v", row)
+	}
+}
+
+func TestMasterThreadRowResolvedBadge(t *testing.T) {
+	to := 15
+	th := CommentThread{Root: mkComment(1, 0, "a.go", nil, &to, false, time.Now())}
+	th.Root.Resolution = &CommentResolution{}
+	if txt := spansText(masterThreadRow(th, 50)); !strings.Contains(txt, "✓") {
+		t.Errorf("resolved row = %q", txt)
+	}
+	th.Root.Resolution = nil
+	if txt := spansText(masterThreadRow(th, 50)); strings.Contains(txt, "✓") {
+		t.Errorf("unresolved row = %q", txt)
+	}
+}
+
+// masterViewFixture builds a detailView on the split layout with the cursor
+// usable for selection tests.
+func masterViewFixture(t *testing.T) (*app, *detailView) {
+	t.Helper()
+	a := &app{w: 120, h: 30, detail: map[int]*prDetail{}}
+	d := a.detailFor(7)
+	d.pr = &PullRequest{ID: 7, Title: "t"}
+	d.comments = masterFixture()
+	d.files = []FileDiff{*hunkFixtureFile()}
+	v := &detailView{prID: 7, tab: tabComments}
+	v.rebuild(a)
+	return a, v
+}
+
+func moveCursorTo(t *testing.T, v *detailView, id int) {
+	t.Helper()
+	for i, r := range v.vp[tabComments].Rows {
+		if got, ok := r.Item.(int); ok && got == id {
+			v.vp[tabComments].Cursor = i
+			return
+		}
+	}
+	t.Fatalf("comment %d not found in master rows", id)
+}
+
+func TestSelectedCommentOnReplyRow(t *testing.T) {
+	_, v := masterViewFixture(t)
+	moveCursorTo(t, v, 4) // reply on thread 2
+	c, th, ok := v.selectedComment()
+	if !ok || c.ID != 4 || th.Root.ID != 2 {
+		t.Errorf("selectedComment = %+v thread=%+v ok=%v", c, th.Root, ok)
+	}
+	if tgt := replyTargetFor(c, th); !strings.Contains(tgt, "返信→") || !strings.Contains(tgt, "L10") {
+		t.Errorf("target = %q", tgt)
+	}
+}
+
+func TestPendingDeleteConfirmFlow(t *testing.T) {
+	a, v := masterViewFixture(t)
+	moveCursorTo(t, v, 4)
+	v.handle(a, Key{Kind: KeyRune, R: 'x'})
+	if v.pendingDelete != 4 || !strings.Contains(a.status, "削除しますか") {
+		t.Fatalf("after x: pendingDelete=%d status=%q", v.pendingDelete, a.status)
+	}
+	// Any key but y cancels.
+	v.handle(a, Key{Kind: KeyRune, R: 'n'})
+	if v.pendingDelete != 0 || !strings.Contains(a.status, "取り消し") {
+		t.Errorf("after n: pendingDelete=%d status=%q", v.pendingDelete, a.status)
+	}
+}
+
+func TestResolveRejectsGeneralThread(t *testing.T) {
+	a, v := masterViewFixture(t)
+	moveCursorTo(t, v, 1) // general thread root
+	v.handle(a, Key{Kind: KeyRune, R: 's'})
+	if !strings.Contains(a.status, "resolve できません") {
+		t.Errorf("status = %q", a.status)
+	}
+	if a.loading != 0 {
+		t.Errorf("no API call must fire for general threads (loading=%d)", a.loading)
+	}
 }
 
 func TestCommentDetailRows(t *testing.T) {

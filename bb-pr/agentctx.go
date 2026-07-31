@@ -82,7 +82,7 @@ func ctxNote(t CommentThread, now time.Time) (agentCtxNote, bool) {
 	}
 	var replies []string
 	for _, r := range t.Replies {
-		replies = append(replies, "↳ "+r.User.Name()+": "+threadBody(r))
+		replies = append(replies, "↳ "+r.User.Name()+": "+threadBody(r.Comment))
 	}
 	n.Rationale = strings.Join(replies, "\n")
 	return n, true

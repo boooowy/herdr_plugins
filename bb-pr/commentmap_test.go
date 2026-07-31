@@ -44,6 +44,33 @@ func TestBuildThreadsNesting(t *testing.T) {
 	}
 }
 
+func TestBuildThreadsNestingDepth(t *testing.T) {
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	comments := []Comment{
+		mkComment(1, 0, "", nil, nil, false, base),
+		mkComment(2, 1, "", nil, nil, false, base.Add(time.Hour)),
+		mkComment(3, 2, "", nil, nil, false, base.Add(2*time.Hour)),     // 孫 (2 の返信)
+		mkComment(4, 1, "", nil, nil, false, base.Add(30*time.Minute)), // 2 より古い兄弟
+	}
+	threads := generalThreads(comments)
+	if len(threads) != 1 {
+		t.Fatalf("got %d threads, want 1", len(threads))
+	}
+	// Tree order: siblings chronological (4 before 2), children right after
+	// their parent with depth+1.
+	got := threads[0].Replies
+	want := []struct{ id, depth int }{{4, 1}, {2, 1}, {3, 2}}
+	if len(got) != len(want) {
+		t.Fatalf("replies = %+v", got)
+	}
+	for i, w := range want {
+		if got[i].ID != w.id || got[i].Depth != w.depth {
+			t.Errorf("reply %d = id %d depth %d, want id %d depth %d",
+				i, got[i].ID, got[i].Depth, w.id, w.depth)
+		}
+	}
+}
+
 func TestFullyDeletedThreadsAreDropped(t *testing.T) {
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	dead := mkComment(1, 0, "", nil, nil, false, base)

@@ -140,7 +140,19 @@ type Comment struct {
 		ID int `json:"id"`
 	} `json:"parent"`
 	Inline *InlineAnchor `json:"inline"`
+	// Resolution is present when the comment's thread is resolved
+	// (thread roots only; absent or null otherwise).
+	Resolution *CommentResolution `json:"resolution"`
 }
+
+// CommentResolution records who resolved a comment thread and when.
+type CommentResolution struct {
+	User      Account   `json:"user"`
+	CreatedOn time.Time `json:"created_on"`
+}
+
+// Resolved reports whether the comment's thread is marked resolved.
+func (c *Comment) Resolved() bool { return c.Resolution != nil }
 
 // page is one page of a Bitbucket paginated collection. Follow Next verbatim
 // (never construct page numbers); size/previous may be absent, so they are

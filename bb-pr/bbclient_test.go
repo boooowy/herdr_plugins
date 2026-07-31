@@ -237,6 +237,52 @@ func TestPostCommentGeneralOmitsAnchor(t *testing.T) {
 	}
 }
 
+func TestCommentActions(t *testing.T) {
+	var gotMethod string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/37/comments/5", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/37/comments/5/resolve", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		if r.Method == http.MethodPost {
+			fmt.Fprint(w, `{"type":"comment_resolution"}`) // 200
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := testClient(srv)
+
+	if err := c.deleteComment("ws", "repo", 37, 5); err != nil || gotMethod != http.MethodDelete {
+		t.Errorf("delete: err=%v method=%s", err, gotMethod)
+	}
+	if err := c.resolveComment("ws", "repo", 37, 5); err != nil || gotMethod != http.MethodPost {
+		t.Errorf("resolve: err=%v method=%s", err, gotMethod)
+	}
+	if err := c.unresolveComment("ws", "repo", 37, 5); err != nil || gotMethod != http.MethodDelete {
+		t.Errorf("unresolve: err=%v method=%s", err, gotMethod)
+	}
+}
+
+func TestCommentActionErrorSurfaces(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict) // already resolved
+		fmt.Fprint(w, `{"error":{"message":"already resolved"}}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	err := testClient(srv).resolveComment("ws", "repo", 37, 5)
+	he, ok := err.(*httpError)
+	if !ok || he.Status != http.StatusConflict {
+		t.Errorf("err = %v (%T)", err, err)
+	}
+}
+
 func TestHTTPErrorSurfacesStatus(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

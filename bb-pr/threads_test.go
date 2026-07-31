@@ -11,7 +11,7 @@ func TestThreadRowsBackgroundLayout(t *testing.T) {
 	thread := CommentThread{
 		Root: Comment{ID: 42, CreatedOn: base,
 			Inline: &InlineAnchor{Path: "a.py", To: &to}},
-		Replies: []Comment{{ID: 43, CreatedOn: base.Add(time.Hour)}},
+		Replies: []Reply{{Comment: Comment{ID: 43, CreatedOn: base.Add(time.Hour)}, Depth: 1}},
 	}
 	thread.Root.Content.Raw = "root body"
 	thread.Replies[0].Content.Raw = "reply body"

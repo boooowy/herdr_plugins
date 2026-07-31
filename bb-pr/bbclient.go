@@ -133,6 +133,46 @@ func (c *bbClient) postJSON(rawURL string, payload, out any) error {
 	return nil
 }
 
+// send performs one authenticated body-less request (DELETE/POST actions).
+// Like postJSON it never retries — these mutate server state.
+func (c *bbClient) send(method, rawURL string) error {
+	req, err := http.NewRequest(method, rawURL, nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(c.email, c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return &httpError{Status: resp.StatusCode, URL: rawURL, Body: strings.TrimSpace(string(body))}
+	}
+	return nil
+}
+
+// deleteComment removes a PR comment (204). A comment with visible replies
+// is soft-deleted server-side: it stays in the collection as deleted:true.
+func (c *bbClient) deleteComment(ws, repo string, prID, commentID int) error {
+	return c.send(http.MethodDelete,
+		c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/comments/%d", prID, commentID)))
+}
+
+// resolveComment marks an inline comment thread resolved (roots only; the
+// API rejects replies and non-diff comments with 403, re-resolving with 409).
+func (c *bbClient) resolveComment(ws, repo string, prID, commentID int) error {
+	return c.send(http.MethodPost,
+		c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/comments/%d/resolve", prID, commentID)))
+}
+
+// unresolveComment reopens a resolved thread (204).
+func (c *bbClient) unresolveComment(ws, repo string, prID, commentID int) error {
+	return c.send(http.MethodDelete,
+		c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/comments/%d/resolve", prID, commentID)))
+}
+
 // postComment creates a PR comment: general (inline == nil), inline
 // (path + to/from), or a reply (parentID > 0 — the server copies the
 // parent's anchor, so replies pass inline == nil).

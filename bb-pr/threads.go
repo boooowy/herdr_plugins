@@ -31,6 +31,9 @@ func threadRows(t CommentThread, width int, now time.Time, anchorLabel string) [
 	if t.Root.Inline != nil && t.Root.Inline.Outdated {
 		header = append(header, Span{" [outdated]", onCmtBg(styleOutdated)})
 	}
+	if t.Root.Resolved() {
+		header = append(header, Span{" [resolved]", onCmtBg(styleApproved)})
+	}
 	bg(header, RowComment, t.Root.ID, true)
 
 	appendBody := func(c Comment, indent string) {
@@ -50,13 +53,15 @@ func threadRows(t CommentThread, width int, now time.Time, anchorLabel string) [
 	appendBody(t.Root, "   ")
 
 	for _, r := range t.Replies {
+		// Nesting: each depth level shifts the ↳ two cells right.
+		indent := "   " + strings.Repeat("  ", r.Depth-1)
 		head := []Span{
-			{"   ↳ ", onCmtBg(styleDim)},
+			{indent + "↳ ", onCmtBg(styleDim)},
 			{r.User.Name(), onCmtBg(styleAuthor)},
 			{" (" + relTime(r.CreatedOn, now) + ")", onCmtBg(styleDim)},
 		}
 		bg(head, RowComment, nil, false)
-		appendBody(r, "     ")
+		appendBody(r.Comment, indent+"  ")
 	}
 
 	rows = append(rows, Row{Kind: RowComment}) // plain gap between threads
