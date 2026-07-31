@@ -12,14 +12,14 @@ import (
 // outside any pane. The repo comes from the cwd's git remote (or
 // BBPR_WORKSPACE/BBPR_REPO in env).
 //
-//	bb-pr dump prs [STATE]
-//	bb-pr dump pr <id>
-//	bb-pr dump diff <id>
-//	bb-pr dump diffstat <id>
-//	bb-pr dump comments <id>
+//	bitbucket-pr dump prs [STATE]
+//	bitbucket-pr dump pr <id>
+//	bitbucket-pr dump diff <id>
+//	bitbucket-pr dump diffstat <id>
+//	bitbucket-pr dump comments <id>
 func runDump(args []string) {
 	if len(args) < 1 {
-		errExit("usage: bb-pr dump <prs [state]|pr <id>|diff <id>|parse <id>|diffstat <id>|comments <id>>")
+		errExit("usage: bitbucket-pr dump <prs [state]|pr <id>|diff <id>|parse <id>|diffstat <id>|comments <id>>")
 	}
 	cfg := loadConfig()
 	email, token, ok := cfg.credentials()
@@ -42,7 +42,7 @@ func runDump(args []string) {
 	}
 	needID := func() {
 		if id <= 0 {
-			errExit("usage: bb-pr dump " + args[0] + " <pr-id>")
+			errExit("usage: bitbucket-pr dump " + args[0] + " <pr-id>")
 		}
 	}
 

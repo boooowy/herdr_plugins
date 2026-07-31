@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const pluginID = "boooowy.bb-pr"
+const pluginID = "boooowy.bitbucket-pr"
 
 // Environment variables carrying the launch context into the viewer pane.
 // The viewer's own HERDR_PANE_ID is the viewer pane itself, so everything it

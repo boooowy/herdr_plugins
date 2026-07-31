@@ -7,7 +7,7 @@ import (
 )
 
 // hunk's --agent-context sidecar: inline annotations rendered inside the
-// diff (Next/Previous Comment jumps between them). bb-pr converts the PR's
+// diff (Next/Previous Comment jumps between them). bitbucket-pr converts the PR's
 // existing inline comment threads into it so hunk shows them in place.
 // Format: https://github.com/modem-dev/hunk (docs/agent-workflows.md).
 type agentContext struct {

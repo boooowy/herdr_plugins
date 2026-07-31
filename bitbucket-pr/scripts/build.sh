@@ -2,4 +2,4 @@
 set -eu
 cd "$(dirname "$0")/.."
 mkdir -p bin
-exec go build -o bin/bb-pr .
+exec go build -o bin/bitbucket-pr .

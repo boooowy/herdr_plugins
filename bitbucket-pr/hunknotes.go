@@ -304,7 +304,7 @@ func offerNotePosting(cfg Config, notes []hunkNote) {
 func confirmNotePosting(cfg Config, notes []hunkNote, prID int) bool {
 	w, h := termSize()
 	s := NewScreen(w, h)
-	s.WriteString(1, 0, fmt.Sprintf("bb-pr — draft note %d件を PR #%d にコメント投稿しますか？", len(notes), prID), styleTitle, w)
+	s.WriteString(1, 0, fmt.Sprintf("bitbucket-pr — draft note %d件を PR #%d にコメント投稿しますか？", len(notes), prID), styleTitle, w)
 	paintSeparator(s, 1, w)
 	y := 2
 	for _, n := range notes {
@@ -333,7 +333,7 @@ func noteFail(cfg Config, msg string, notes []hunkNote, prID int) {
 	}
 	w, h := termSize()
 	s := NewScreen(w, h)
-	s.WriteString(1, 0, "bb-pr — note を投稿できませんでした", styleTitle, w)
+	s.WriteString(1, 0, "bitbucket-pr — note を投稿できませんでした", styleTitle, w)
 	y := 2
 	for _, l := range wrapText(msg, w-4) {
 		s.WriteString(2, y, l, styleError, w)

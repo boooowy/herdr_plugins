@@ -196,7 +196,7 @@ func runCommentUI() {
 func commentFail(cfg Config, msg, draft string) {
 	w, h := termSize()
 	s := NewScreen(w, h)
-	s.WriteString(1, 0, "bb-pr — コメントを投稿できませんでした", styleTitle, w)
+	s.WriteString(1, 0, "bitbucket-pr — コメントを投稿できませんでした", styleTitle, w)
 	y := 2
 	for _, l := range wrapText(msg, w-4) {
 		s.WriteString(2, y, l, styleError, w)

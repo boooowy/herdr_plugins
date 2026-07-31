@@ -62,7 +62,7 @@ var helpCommon = []helpLine{
 
 func (h helpView) render(a *app, s *Screen) {
 	sec := helpByCtx[h.ctx]
-	s.WriteString(1, 0, "bb-pr — キーバインド ("+sec.title+")", styleTitle, a.w)
+	s.WriteString(1, 0, "bitbucket-pr — キーバインド ("+sec.title+")", styleTitle, a.w)
 	paintSeparator(s, 1, a.w)
 	y := 2
 	write := func(l helpLine) {

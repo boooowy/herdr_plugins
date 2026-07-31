@@ -299,7 +299,7 @@ func showDiffToolInstallHelp(cfg Config, missing string) {
 func showToolInstallHelp(cfg Config, missing string, lines []string) {
 	w, h := termSize()
 	s := NewScreen(w, h)
-	s.WriteString(1, 0, fmt.Sprintf("bb-pr — ツール %q が見つかりません", missing), styleTitle, w)
+	s.WriteString(1, 0, fmt.Sprintf("bitbucket-pr — ツール %q が見つかりません", missing), styleTitle, w)
 	for i, l := range lines {
 		s.WriteString(1, i+2, l, styleNone, w)
 	}

@@ -1,13 +1,18 @@
-# bb-pr — Bitbucket PR Viewer
+# bitbucket-pr — Bitbucket PR Viewer
 
 Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧・コメントするビューアです。
 PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）
 の閲覧に加え、`C` キーでコード行へのインラインコメント・返信・PRコメントを投稿できます
 （本文はいつものエディタが popup で開きます）。approve / merge は非対応です（`o` でブラウザへ）。
 
-- plugin ID: `boooowy.bb-pr`
-- version: `0.11.0`
+- plugin ID: `boooowy.bitbucket-pr`
+- version: `0.14.0`
 - platforms: macOS / Linux
+
+> **v0.14.0 で `bb-pr` からリネームしました。** plugin ID が
+> `boooowy.bb-pr` → `boooowy.bitbucket-pr` に変わったため、herdr からは別プラグイン扱いになります。
+> 旧 ID の config ディレクトリにある `config.toml` を新 ID のディレクトリへコピーし、
+> 旧プラグインはアンインストールしてください（state ディレクトリはキャッシュのみなので移行不要）。
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
 （デフォルト: [hunk](https://github.com/modem-dev/hunk)、config で任意ツールに変更可）の
@@ -76,13 +81,13 @@ PR 更新後に位置がずれたコメント（outdated）は捨てずに、各
 ## インストール
 
 ```sh
-herdr plugin install boooowy/herdr_plugins/bb-pr
+herdr plugin install boooowy/herdr_plugins/bitbucket-pr
 ```
 
 ローカル開発では:
 
 ```sh
-cd bb-pr && make plugin-link
+cd bitbucket-pr && make plugin-link
 ```
 
 ## 認証設定
@@ -99,7 +104,7 @@ API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens
 **コメント投稿（`C`）を使う場合は、トークンに pullrequest への write スコープが必要です**
 （閲覧だけなら read で十分）。
 
-環境変数の代わりに `~/.config/herdr/plugins/config/boooowy.bb-pr/config.toml` に
+環境変数の代わりに `~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml` に
 `email` / `api_token` を書くこともできます（そちらが優先）。
 
 ## 使い方
@@ -118,7 +123,7 @@ API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens
 [[keys.command]]
 key = "cmd+alt+9"                # 配列も可: ["prefix+p", "cmd+alt+9"]
 type = "plugin_action"           # shell/pane/popup では動きません
-command = "boooowy.bb-pr.open"
+command = "boooowy.bitbucket-pr.open"
 description = "Bitbucket PR: open viewer for current repo"
 ```
 
@@ -223,26 +228,26 @@ outdated_fg = "yellow"
   （diff から位置が特定できないコメントは末尾に L番号ラベル付きで表示）。選択中のスレッドは
   プレビュー側の背景色が明るくなり（`focus_bg`）、`C` の投稿先はフッタに常に表示されます。
   90桁未満の狭いペインでは従来のフラット一覧に自動フォールバックします。
-- hunk の draft note は hunk のプロセス終了と同時に hunk 側から消えるため、bb-pr は hunk の
+- hunk の draft note は hunk のプロセス終了と同時に hunk 側から消えるため、bitbucket-pr は hunk の
   起動中に 0.5 秒間隔でローカルの hunk セッションから note を取得しています。note を書き終えた
   直後（0.5秒以内）に q で閉じると取りこぼす理論上の窓がありますが、実用上は問題ありません。
 
 ## 開発
 
 ```sh
-make build   # bin/bb-pr
+make build   # bin/bitbucket-pr
 make test    # go test -race ./...
 make plugin-link
 
 # デバッグ
-herdr plugin action invoke open --plugin boooowy.bb-pr
-herdr plugin log list --plugin boooowy.bb-pr --limit 10
-touch /tmp/bbpr-debug.log   # 詳細ログ有効化
+herdr plugin action invoke open --plugin boooowy.bitbucket-pr
+herdr plugin log list --plugin boooowy.bitbucket-pr --limit 10
+touch /tmp/bitbucket-pr-debug.log   # 詳細ログ有効化
 
 # API 応答の目視（ペイン外で実行）
-./bin/bb-pr dump prs
-./bin/bb-pr dump pr 482
-./bin/bb-pr dump diff 482
+./bin/bitbucket-pr dump prs
+./bin/bitbucket-pr dump pr 482
+./bin/bitbucket-pr dump diff 482
 ```
 
 `screen.go` / `keys.go` / `debug.go` / `herdr.go` は hint-copy（commit `2029b96` 時点）の

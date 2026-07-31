@@ -1,4 +1,4 @@
-// Snapshot of hint-copy/herdr.go as of 2029b96 (trimmed to the methods bb-pr
+// Snapshot of hint-copy/herdr.go as of 2029b96 (trimmed to the methods bitbucket-pr
 // needs; focusedPane gained cwd/foreground_cwd). Do not import hint-copy —
 // it is being refactored independently.
 package main
@@ -63,7 +63,7 @@ func (c *herdrClient) call(method string, params map[string]any, out any) error 
 
 	// json.Encoder.Encode appends a trailing newline, which is exactly the
 	// framing herdr expects for each request.
-	if err := json.NewEncoder(conn).Encode(request{ID: "bb-pr", Method: method, Params: params}); err != nil {
+	if err := json.NewEncoder(conn).Encode(request{ID: "bitbucket-pr", Method: method, Params: params}); err != nil {
 		return fmt.Errorf("write request: %w", err)
 	}
 
@@ -82,7 +82,7 @@ func (c *herdrClient) call(method string, params map[string]any, out any) error 
 	return nil
 }
 
-// paneInfo is the slice of pane.list bb-pr cares about: identity, focus, and
+// paneInfo is the slice of pane.list bitbucket-pr cares about: identity, focus, and
 // the two working-directory fields (foreground_cwd is the cwd of the process
 // holding the PTY — e.g. the shell the user is typing in — and is fresher
 // than cwd).

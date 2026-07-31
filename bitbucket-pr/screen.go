@@ -1,5 +1,5 @@
 // Snapshot of hint-copy/screen.go as of 2029b96 (adapted: dropped the
-// dynamic styleTable/PutCells used for ANSI captures — bb-pr paints all
+// dynamic styleTable/PutCells used for ANSI captures — bitbucket-pr paints all
 // content with its own styles). Do not import hint-copy — it is being
 // refactored independently.
 package main

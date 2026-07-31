@@ -2,7 +2,7 @@
 
 build:
 	mkdir -p bin
-	go build -o bin/bb-pr .
+	go build -o bin/bitbucket-pr .
 
 test:
 	go test -race ./...

@@ -8,15 +8,15 @@ import (
 	"time"
 )
 
-// debugf appends a timestamped line to /tmp/bbpr-debug.log, but only when
+// debugf appends a timestamped line to /tmp/bitbucket-pr-debug.log, but only when
 // that file already exists (`touch` it to enable, remove to disable) — the
 // viewer pane has no visible stderr, so this is the only way to observe
 // startup behavior in a real herdr session.
 func debugf(format string, args ...any) {
-	if _, err := os.Stat("/tmp/bbpr-debug.log"); err != nil {
+	if _, err := os.Stat("/tmp/bitbucket-pr-debug.log"); err != nil {
 		return
 	}
-	f, err := os.OpenFile("/tmp/bbpr-debug.log", os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile("/tmp/bitbucket-pr-debug.log", os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return
 	}

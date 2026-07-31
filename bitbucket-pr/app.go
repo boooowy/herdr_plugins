@@ -273,7 +273,7 @@ func showAuthHelp(out *bufio.Writer, cfg Config, w, h int) {
 		"APIトークンは https://id.atlassian.com/manage-profile/security/api-tokens",
 		"で作成できます（App Password は2026年6月に廃止済み）。",
 	}
-	s.WriteString(1, 0, "bb-pr — 認証設定が必要です", styleTitle, w)
+	s.WriteString(1, 0, "bitbucket-pr — 認証設定が必要です", styleTitle, w)
 	for i, l := range lines {
 		s.WriteString(1, i+2, l, styleNone, w)
 	}

@@ -1,4 +1,4 @@
-module github.com/boooowy/herdr_plugins/bb-pr
+module github.com/boooowy/herdr_plugins/bitbucket-pr
 
 go 1.26.4
 
