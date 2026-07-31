@@ -35,7 +35,7 @@ type Config struct {
 	DifftoolPlacement string   `toml:"difftool_placement"` // popup | overlay | tab | split
 	DifftoolWidth     string   `toml:"difftool_width"`     // popup only: cells or "95%"
 	DifftoolHeight    string   `toml:"difftool_height"`
-	CommentEditor     []string `toml:"comment_editor"` // C key; empty = $EDITOR → nvim
+	CommentEditor     []string `toml:"comment_editor"` // c key; empty = $EDITOR → nvim
 
 	MDHeadingFg string `toml:"md_heading_fg"` // in-tab markdown headings
 	MDCodeFg    string `toml:"md_code_fg"`    // in-tab markdown code

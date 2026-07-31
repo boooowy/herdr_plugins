@@ -11,7 +11,7 @@ import (
 )
 
 // Comment posting: the viewer never does text input itself (the key reader
-// can't take Japanese input) — instead `C` opens the user's editor on a
+// can't take Japanese input) — instead `c` opens the user's editor on a
 // draft file in a herdr popup, and this comment-ui entrypoint posts the
 // saved body to Bitbucket when the editor exits.
 

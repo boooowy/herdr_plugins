@@ -2,11 +2,11 @@
 
 Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧・コメントするビューアです。
 PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）
-の閲覧に加え、`C` キーでコード行へのインラインコメント・返信・PRコメントを投稿できます
+の閲覧に加え、`c` キーでコード行へのインラインコメント・返信・PRコメントを投稿できます
 （本文はいつものエディタが popup で開きます）。approve / merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
-- version: `0.14.0`
+- version: `0.15.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -56,7 +56,7 @@ diff ビュー（hunk 単位・インラインコメント埋め込み）:
       次の PR でやります
 ─── @@ -40,3 +54,8 @@ ──────────────── [hunk 2/5] [+11 lines] ───
 ──────────────────────────────────────────────────────────────────────
- j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za/zA:折畳  c:💬  o:ブラウザ  q:戻る
+ j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za/zA:折畳  C:💬  c:コメント  q:戻る
 ```
 
 PR 更新後に位置がずれたコメント（outdated）は捨てずに、各ファイル末尾の
@@ -98,7 +98,7 @@ export ATLASSIAN_API_TOKEN="<APIトークン>"
 
 API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens> で作成します
 （App Password は 2026年6月に廃止済みのため使えません）。
-**コメント投稿（`C`）を使う場合は、トークンに pullrequest への write スコープが必要です**
+**コメント投稿（`c`）を使う場合は、トークンに pullrequest への write スコープが必要です**
 （閲覧だけなら read で十分）。
 
 環境変数の代わりに `~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml` に
@@ -134,15 +134,15 @@ description = "Bitbucket PR: open viewer for current repo"
 | `Ctrl-d` / `Ctrl-u`, `Ctrl-f` / `Ctrl-b`               | スクロール（Comments タブでは `Ctrl-d`/`Ctrl-u` が右プレビューのスクロール）                                                                                                                                                                                                                         |
 | `g` / `G`                                              | 先頭 / 末尾                                                                                                                                                                                                                                                                                          |
 | `Enter`                                                | 開く（一覧→詳細→**diff ツール**、Comments のスレッド／ファイル→**コードへジャンプ**）/ 内蔵ビューアでは hunk 折畳トグル                                                                                                                                                                              |
-| `v`                                                    | Files タブ: 内蔵 diff ビューアで開く / 内蔵ビューア内: **行選択の開始・解除**（`j`/`k` で範囲を伸ばし `C` で複数行コメント。`Esc` でも解除）                                                                                                                                                         |
+| `v`                                                    | Files タブ: 内蔵 diff ビューアで開く / 内蔵ビューア内: **行選択の開始・解除**（`j`/`k` で範囲を伸ばし `c` で複数行コメント。`Esc` でも解除）                                                                                                                                                         |
 | `Tab` / `Shift-Tab` / `1`-`3` / `l` / `h`（`→` / `←`） | 詳細タブ切替（Overview / Files / Comments）                                                                                                                                                                                                                                                          |
 | `s` / `Tab` / `l` / `h`（`→` / `←`）                   | state フィルタ切替（OPEN / MERGED / DECLINED / SUPERSEDED）（一覧）                                                                                                                                                                                                                                  |
 | `]h` / `[h`                                            | 次 / 前の hunk（内蔵ビューア）                                                                                                                                                                                                                                                                       |
 | `]f` / `[f`（`→` / `←`）                               | 次 / 前のファイル（内蔵ビューア）                                                                                                                                                                                                                                                                    |
 | `za` / `zA`                                            | hunk 折畳 / 全折畳（内蔵ビューア）                                                                                                                                                                                                                                                                   |
 | `w`                                                    | 長い行の折返し切替（内蔵ビューア）                                                                                                                                                                                                                                                                   |
-| `c`                                                    | インラインコメント表示切替（内蔵ビューア）                                                                                                                                                                                                                                                           |
-| `C`                                                    | **コメント投稿** — diff 行:インラインコメント / `v` 選択中:**複数行コメント** / コメント上:返信（Comments タブの返信行では**入れ子返信**） / それ以外:PRコメント。投稿先はフッタに「C:返信→著者 L15」等で常に表示。エディタが popup で開き、保存して閉じると投稿（空なら中止）。**画面には自動反映** |
+| `c`                                                    | **コメント投稿** — diff 行:インラインコメント / `v` 選択中:**複数行コメント** / コメント上:返信（Comments タブの返信行では**入れ子返信**） / それ以外:PRコメント。投稿先はフッタに「c:返信→著者 L15」等で常に表示。エディタが popup で開き、保存して閉じると投稿（空なら中止）。**画面には自動反映** |
+| `C`                                                    | インラインコメント表示切替（内蔵ビューア）                                                                                                                                                                                                                                                           |
 | `x`                                                    | Comments タブ: 選択コメントを**削除**（フッタで `y` 確認。返信付きコメントは Bitbucket 仕様でソフト削除）                                                                                                                                                                                            |
 | `s`                                                    | Comments タブ: スレッドを **resolve / 再オープン**（インラインスレッドのみ。返信行では**親スレッドに作用** — フッタに「s:親をresolve」と表示。解決済みは一覧に ✓・スレッドに [resolved] 表示）                                                                                                       |
 | `D`                                                    | PR 全体の diff を diff ツールで開く                                                                                                                                                                                                                                                                  |
@@ -188,7 +188,7 @@ difftool_width = "95%"        # popup のみ有効（セル数 or "95%"）
 difftool_height = "95%"
 diff_tab_title = "PR #{id}"   # difftool_placement = "tab" のタブ名。{id} {title} {repo}
 
-# C キーのコメント編集エディタ（未設定なら $EDITOR、それも無ければ nvim）
+# c キーのコメント編集エディタ（未設定なら $EDITOR、それも無ければ nvim）
 comment_editor = []           # 例: ["nvim", "+startinsert", "{file}"]
 
 # タブ内 Markdown レンダリングの色
@@ -227,7 +227,7 @@ outdated_fg = "yellow"
   スレッド一覧（L番号・著者・本文抜粋）、右に選択中ファイルのプレビュー。プレビューは
   **コメントが付いた hunk 全体を diff 形式で表示**し、該当行の直下にコメントを埋め込みます
   （diff から位置が特定できないコメントは末尾に L番号ラベル付きで表示）。選択中のスレッドは
-  プレビュー側の背景色が明るくなり（`focus_bg`）、`C` の投稿先はフッタに常に表示されます。
+  プレビュー側の背景色が明るくなり（`focus_bg`）、`c` の投稿先はフッタに常に表示されます。
   90桁未満の狭いペインでは従来のフラット一覧に自動フォールバックします。
 - hunk の draft note は hunk のプロセス終了と同時に hunk 側から消えるため、bitbucket-pr は hunk の
   起動中に 0.5 秒間隔でローカルの hunk セッションから note を取得しています。note を書き終えた

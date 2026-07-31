@@ -230,7 +230,7 @@ func (v *diffView) rebuild(a *app) {
 
 // diffLineRows renders one diff body line: old/new line numbers, the marker,
 // and the content in the line-kind color. The row's Item carries the
-// DiffLine so `C` can anchor an inline comment to it. With wrap, overlong
+// DiffLine so `c` can anchor an inline comment to it. With wrap, overlong
 // content continues on gutter-indented, non-selectable rows.
 func diffLineRows(l DiffLine, numW, width int, wrap bool) []Row {
 	oldNo, newNo := "", ""
@@ -448,14 +448,14 @@ func (v *diffView) handle(a *app, k Key) {
 		v.switchFile(a, -1)
 	case k.Kind == KeyEnter:
 		v.toggleFold(a)
-	case isKey(k, 'c'):
+	case isKey(k, 'C'):
 		v.showCmt = !v.showCmt
 		v.rebuild(a)
 	case isKey(k, 'w'):
 		v.wrap = !v.wrap
 		v.rebuild(a)
 	case isKey(k, 'v') || isKey(k, 'V'):
-		// Start / cancel a line selection (extend with j/k, then C).
+		// Start / cancel a line selection (extend with j/k, then c).
 		switch {
 		case v.selAnchor >= 0:
 			v.selAnchor = -1
@@ -466,7 +466,7 @@ func (v *diffView) handle(a *app, k Key) {
 				a.status = "diff 行の上で v を押してください"
 			}
 		}
-	case isKey(k, 'C'):
+	case isKey(k, 'c'):
 		v.composeComment(a)
 	case isKey(k, 'o'):
 		d := a.detailFor(v.prID)
@@ -637,15 +637,15 @@ func (v *diffView) footer(a *app) string {
 				label = "選択中 " + anchorLabel(in)
 			}
 		}
-		return label + "  j/k:範囲変更  C:コメント  v/Esc:解除"
+		return label + "  j/k:範囲変更  c:コメント  v/Esc:解除"
 	}
-	cKey := "C:コメント"
+	cKey := "c:コメント"
 	if r := v.vp.Current(); r != nil && r.Kind == RowComment {
 		if id, ok := r.Item.(int); ok {
 			if t, ok := v.threadFor[id]; ok {
-				cKey = "C:" + replyTarget(t)
+				cKey = "c:" + replyTarget(t)
 			}
 		}
 	}
-	return "j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za:折畳  w:折返し  v:選択  c:💬  " + cKey + "  D:diffツール  q:戻る"
+	return "j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za:折畳  w:折返し  v:選択  C:💬  " + cKey + "  D:diffツール  q:戻る"
 }

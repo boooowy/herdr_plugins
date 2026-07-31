@@ -918,7 +918,7 @@ func (v *detailView) handle(a *app, k Key) {
 		if d.pr != nil {
 			copyToClipboard(a, d.pr.Source.Branch.Name)
 		}
-	case isKey(k, 'C'):
+	case isKey(k, 'c'):
 		// Reply to the exact comment under the Comments-tab cursor (a reply
 		// row nests under that reply), otherwise a new general PR comment.
 		// A file header is ambiguous — ask for a thread.
@@ -979,7 +979,7 @@ func (v *detailView) footer(a *app) string {
 			base += "Enter:diffツール  v:内蔵diff  "
 		}
 	}
-	cKey := "C:コメント"
+	cKey := "c:コメント"
 	if v.tab == tabComments {
 		base += "Enter:コードへ  "
 		if commentsSplit(a) {
@@ -998,7 +998,7 @@ func (v *detailView) footer(a *app) string {
 			} else {
 				sKey = "s:" + who + "resolve"
 			}
-			cKey = "C:" + replyTargetFor(c, t)
+			cKey = "c:" + replyTargetFor(c, t)
 		}
 		base += "x:削除  " + sKey + "  "
 	}
