@@ -65,6 +65,15 @@ type difftoolRequest struct {
 	focus string
 }
 
+// keyGrabber is a view that is accepting text input and must therefore see
+// every key — including the q and Esc the main loop otherwise handles itself.
+type keyGrabber interface{ grabsKeys() bool }
+
+func grabsKeys(v view) bool {
+	g, ok := v.(keyGrabber)
+	return ok && g.grabsKeys()
+}
+
 func (a *app) push(v view) { a.stack = append(a.stack, v) }
 
 func (a *app) pop() {
@@ -227,6 +236,10 @@ func runUI() {
 			switch {
 			case k.Kind == KeyCtrl && k.R == 'c':
 				return
+			case grabsKeys(a.top()):
+				// A view taking text input (the / filter) gets every key,
+				// q and Esc included.
+				a.top().handle(a, k)
 			case k.Kind == KeyRune && k.R == 'q', k.Kind == KeyEsc:
 				if v, ok := a.top().(escInterceptor); ok && v.interceptEsc(a) {
 					break // the view consumed it (e.g. cancelled a selection)
