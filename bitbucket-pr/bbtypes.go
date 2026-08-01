@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Bitbucket Cloud API 2.0 payload slices — only the fields the viewer reads.
 
@@ -47,6 +50,57 @@ type Participant struct {
 	Role     string  `json:"role"`  // PARTICIPANT | REVIEWER
 	State    string  `json:"state"` // approved | changes_requested | ""
 	Approved bool    `json:"approved"`
+}
+
+type reviewerStatus uint8
+
+const (
+	reviewerPending reviewerStatus = iota
+	reviewerChangesRequested
+	reviewerApproved
+)
+
+type reviewerInfo struct {
+	User   Account
+	Status reviewerStatus
+}
+
+// pullRequestReviewers normalizes reviewer state for every view. Bitbucket
+// occasionally returns the same account more than once in participants; keep
+// its first position while retaining the strongest state we have observed.
+func pullRequestReviewers(pr *PullRequest) []reviewerInfo {
+	seen := make(map[string]int)
+	authorKey := accountKey(pr.Author)
+	var reviewers []reviewerInfo
+	for _, participant := range pr.Participants {
+		role := strings.ToUpper(participant.Role)
+		state := strings.ToLower(participant.State)
+		if role != "REVIEWER" && !participant.Approved && state == "" {
+			continue
+		}
+		key := accountKey(participant.User)
+		if key == "" || key == authorKey {
+			continue
+		}
+		status := reviewerPending
+		switch {
+		case participant.Approved || state == "approved":
+			status = reviewerApproved
+		case state == "changes_requested":
+			status = reviewerChangesRequested
+		case role != "REVIEWER":
+			continue
+		}
+		if i, ok := seen[key]; ok {
+			if status > reviewers[i].Status {
+				reviewers[i].Status = status
+			}
+			continue
+		}
+		seen[key] = len(reviewers)
+		reviewers = append(reviewers, reviewerInfo{User: participant.User, Status: status})
+	}
+	return reviewers
 }
 
 // PullRequest is a PR from the list or detail endpoint. The trimmed list

@@ -45,7 +45,15 @@ type AvatarCell struct {
 	Cols, Rows int
 	URL        string
 	AccountID  string
+	Badge      AvatarBadge
 }
+
+type AvatarBadge uint8
+
+const (
+	AvatarBadgeNone AvatarBadge = iota
+	AvatarBadgeApproved
+)
 
 func NewScreen(w, h int) *Screen {
 	s := &Screen{W: w, H: h, cells: make([]Cell, w*h)}
@@ -59,11 +67,11 @@ func (s *Screen) at(x, y int) *Cell { return &s.cells[y*s.W+x] }
 
 // AddAvatar records a visible image placement, ignoring invalid or clipped
 // rectangles. Kitty graphics should never spill outside the current frame.
-func (s *Screen) AddAvatar(x, y, cols, rows int, rawURL, accountID string) {
+func (s *Screen) AddAvatar(x, y, cols, rows int, rawURL, accountID string, badge AvatarBadge) {
 	if rawURL == "" || cols <= 0 || rows <= 0 || x < 0 || y < 0 || x+cols > s.W || y+rows > s.H {
 		return
 	}
-	s.avatars = append(s.avatars, AvatarCell{X: x, Y: y, Cols: cols, Rows: rows, URL: rawURL, AccountID: accountID})
+	s.avatars = append(s.avatars, AvatarCell{X: x, Y: y, Cols: cols, Rows: rows, URL: rawURL, AccountID: accountID, Badge: badge})
 }
 
 func (s *Screen) Avatars() []AvatarCell { return s.avatars }

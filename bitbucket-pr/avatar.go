@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/color"
 	_ "image/gif"
 	_ "image/jpeg"
 	"image/png"
@@ -33,15 +34,19 @@ const (
 
 // appendAccountName reserves a square 2x1-cell slot immediately before an
 // account name and returns the row-relative image placement for that slot.
+// Keeping the slot when the URL is absent prevents neighbouring account and
+// status columns from shifting while an image is unavailable.
 func appendAccountName(spans []Span, account Account, name string, nameStyle, gapStyle StyleID, enabled bool) ([]Span, []RowAvatar) {
 	var avatars []RowAvatar
-	if enabled && account.AvatarURL() != "" {
+	if enabled {
 		col := spansWidth(spans)
 		spans = append(spans, Span{Text: strings.Repeat(" ", compactAvatarCols), Style: gapStyle})
-		avatars = append(avatars, RowAvatar{
-			URL: account.AvatarURL(), AccountID: account.AccountID,
-			Col: col, Cols: compactAvatarCols, Rows: 1,
-		})
+		if account.AvatarURL() != "" {
+			avatars = append(avatars, RowAvatar{
+				URL: account.AvatarURL(), AccountID: account.AccountID,
+				Col: col, Cols: compactAvatarCols, Rows: 1,
+			})
+		}
 	}
 	spans = append(spans, Span{Text: name, Style: nameStyle})
 	return spans, avatars
@@ -787,7 +792,7 @@ func (g *avatarGraphics) submit(cells []AvatarCell) {
 			continue
 		}
 		scene.avatars = append(scene.avatars, renderedAvatar{cell: cell, image: snapshot.image})
-		fmt.Fprintf(&key, "%s:%s@%d,%d,%d,%d:%d;", cell.AccountID, cell.URL, cell.X, cell.Y, cell.Cols, cell.Rows, snapshot.version)
+		key.WriteString(avatarSceneItemKey(cell, snapshot.version))
 	}
 	if key.String() == g.lastSceneKey {
 		return
@@ -803,6 +808,10 @@ func (g *avatarGraphics) submit(cells []AvatarCell) {
 		}
 		g.work <- scene
 	}
+}
+
+func avatarSceneItemKey(cell AvatarCell, version uint64) string {
+	return fmt.Sprintf("%s:%s@%d,%d,%d,%d:%d:%d;", cell.AccountID, cell.URL, cell.X, cell.Y, cell.Cols, cell.Rows, cell.Badge, version)
 }
 
 func (g *avatarGraphics) run() {
@@ -888,10 +897,89 @@ func composeAvatarScene(avatars []renderedAvatar, metrics paneGraphicsMetrics) (
 		y := (a.cell.Y - minY) * metrics.CellHeightPX
 		dst := image.Rect(x, y, x+a.cell.Cols*metrics.CellWidthPX, y+a.cell.Rows*metrics.CellHeightPX)
 		xdraw.CatmullRom.Scale(canvas, dst, a.image, a.image.Bounds(), xdraw.Over, nil)
+		if a.cell.Badge == AvatarBadgeApproved {
+			drawApprovedBadge(canvas, dst)
+		}
 	}
 	var out bytes.Buffer
 	if err := png.Encode(&out, canvas); err != nil {
 		return nil, 0, 0, AvatarCell{}, err
 	}
 	return out.Bytes(), imageW, imageH, AvatarCell{X: minX, Y: minY, Cols: cols, Rows: rows}, nil
+}
+
+func drawApprovedBadge(canvas *image.NRGBA, bounds image.Rectangle) {
+	side := bounds.Dx()
+	if bounds.Dy() < side {
+		side = bounds.Dy()
+	}
+	radius := side / 4
+	if radius < 3 {
+		radius = 3
+	}
+	if radius > 7 {
+		radius = 7
+	}
+	cx, cy := bounds.Max.X-radius, bounds.Max.Y-radius
+	drawBadgeCircle(canvas, bounds, cx, cy, radius, color.NRGBA{R: 15, G: 23, B: 42, A: 255})
+	drawBadgeCircle(canvas, bounds, cx, cy, radius-1, color.NRGBA{R: 34, G: 197, B: 94, A: 255})
+	white := color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+	drawBadgeLine(canvas, bounds, cx-radius/2, cy, cx-1, cy+radius/3, white)
+	drawBadgeLine(canvas, bounds, cx-1, cy+radius/3, cx+radius/2, cy-radius/3, white)
+}
+
+func drawBadgeCircle(canvas *image.NRGBA, bounds image.Rectangle, cx, cy, radius int, c color.NRGBA) {
+	for y := cy - radius; y <= cy+radius; y++ {
+		for x := cx - radius; x <= cx+radius; x++ {
+			if x < bounds.Min.X || x >= bounds.Max.X || y < bounds.Min.Y || y >= bounds.Max.Y {
+				continue
+			}
+			dx, dy := x-cx, y-cy
+			if dx*dx+dy*dy <= radius*radius {
+				canvas.SetNRGBA(x, y, c)
+			}
+		}
+	}
+}
+
+func drawBadgeLine(canvas *image.NRGBA, bounds image.Rectangle, x0, y0, x1, y1 int, c color.NRGBA) {
+	dx, dy := absInt(x1-x0), -absInt(y1-y0)
+	sx := -1
+	if x0 < x1 {
+		sx = 1
+	}
+	sy := -1
+	if y0 < y1 {
+		sy = 1
+	}
+	err := dx + dy
+	for {
+		for oy := -1; oy <= 1; oy++ {
+			for ox := -1; ox <= 1; ox++ {
+				x, y := x0+ox, y0+oy
+				if x >= bounds.Min.X && x < bounds.Max.X && y >= bounds.Min.Y && y < bounds.Max.Y {
+					canvas.SetNRGBA(x, y, c)
+				}
+			}
+		}
+		if x0 == x1 && y0 == y1 {
+			break
+		}
+		e2 := 2 * err
+		if e2 >= dy {
+			err += dy
+			x0 += sx
+		}
+		if e2 <= dx {
+			err += dx
+			y0 += sy
+		}
+	}
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

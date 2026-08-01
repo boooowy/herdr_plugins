@@ -33,6 +33,7 @@ type RowAvatar struct {
 	Col          int
 	Cols         int
 	Rows         int
+	Badge        AvatarBadge
 	SelectedOnly bool
 }
 
@@ -209,7 +210,7 @@ func (v *Viewport) Paint(s *Screen, r Rect) {
 			if ax < r.X || ay < r.Y || ax+avatar.Cols > r.X+r.W || ay+avatar.Rows > r.Y+r.H {
 				continue
 			}
-			s.AddAvatar(ax, ay, avatar.Cols, avatar.Rows, avatar.URL, avatar.AccountID)
+			s.AddAvatar(ax, ay, avatar.Cols, avatar.Rows, avatar.URL, avatar.AccountID, avatar.Badge)
 		}
 		if idx == v.Cursor {
 			s.StyleRow(r.Y+i, r.X, r.X+r.W, styleNone, styleCursor)

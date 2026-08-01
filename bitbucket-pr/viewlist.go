@@ -10,7 +10,15 @@ import (
 // prStates is the `s` key's filter cycle.
 var prStates = []string{"OPEN", "MERGED", "DECLINED", "SUPERSEDED"}
 
-const listReviewerLimit = 4
+const (
+	listReviewerLimit   = 4
+	listTitleMaxWidth   = 64
+	listIDWidth         = 8
+	listCommentWidth    = 6
+	listRoleWidth       = 3
+	listAuthorNameWidth = 16
+	listUpdatedWidth    = 10
+)
 
 // listView is the PR list: one selectable row per PR plus a muted meta row
 // with the branch flow underneath.
@@ -128,26 +136,18 @@ func (v *listView) rebuild(a *app) {
 			continue
 		}
 		v.shown++
-		author := truncateWidth(pr.Author.Name(), 16)
-		updated := relTime(pr.UpdatedOn, now)
-		avatarW := 0
-		if a.avatarsEnabled() && pr.Author.AvatarURL() != "" {
-			avatarW = compactAvatarCols
-		}
+		author := padRight(truncateWidth(pr.Author.Name(), listAuthorNameWidth), listAuthorNameWidth)
+		updated := padRight(truncateWidth(relTime(pr.UpdatedOn, now), listUpdatedWidth), listUpdatedWidth)
 		badge := ""
 		if pr.CommentCount > 0 {
-			badge = fmt.Sprintf(" 💬%d", pr.CommentCount)
+			badge = fmt.Sprintf("💬%d", pr.CommentCount)
 		}
-		rightW := 1 + avatarW + displayWidth(author) + 2 + displayWidth(updated)
-		titleW := a.w - 8 - displayWidth(badge) - rightW
-		if titleW < 1 {
-			titleW = 1
-		}
+		titleW := listTitleWidth(a)
 		spans := []Span{
-			Span{fmt.Sprintf(" #%-5d ", pr.ID), styleMeta},
-			Span{padRight(pr.Title, titleW), styleNone},
-			Span{badge, styleDim},
-			Span{" ", styleDim},
+			{fmt.Sprintf(" #%-5d ", pr.ID), styleMeta},
+			{padRight(truncateWidth(pr.Title, titleW), titleW), styleNone},
+			{padRight(truncateWidth(badge, listCommentWidth), listCommentWidth), styleDim},
+			{"A: ", styleDim},
 		}
 		spans, avatars := appendAccountName(spans, pr.Author, author, styleDim, styleDim, a.avatarsEnabled())
 		spans = append(spans, Span{"  " + updated, styleDim})
@@ -172,25 +172,19 @@ func (v *listView) rebuild(a *app) {
 	v.fillFilter(a)
 }
 
-func listReviewers(pr *PullRequest) []Account {
-	seen := make(map[string]struct{})
-	authorKey := accountKey(pr.Author)
-	var reviewers []Account
-	for _, participant := range pr.Participants {
-		if participant.Role != "REVIEWER" {
-			continue
-		}
-		key := accountKey(participant.User)
-		if key == "" || key == authorKey {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		reviewers = append(reviewers, participant.User)
+func listTitleWidth(a *app) int {
+	avatarWidth := 0
+	if a.avatarsEnabled() {
+		avatarWidth = compactAvatarCols
 	}
-	return reviewers
+	width := a.w - listIDWidth - listCommentWidth - listRoleWidth - avatarWidth - listAuthorNameWidth - 2 - listUpdatedWidth
+	if width > listTitleMaxWidth {
+		width = listTitleMaxWidth
+	}
+	if width < 1 {
+		width = 1
+	}
+	return width
 }
 
 func accountKey(account Account) string {
@@ -208,14 +202,18 @@ func accountKey(account Account) string {
 
 func listMetaRow(a *app, pr *PullRequest) Row {
 	branch := pr.Source.Branch.Name + " → " + pr.Destination.Branch.Name
+	titleWidth := listTitleWidth(a)
 	if !a.avatarsEnabled() {
-		return textRow(Span{"        ", styleNone}, Span{branch, styleDim})
+		return textRow(
+			Span{strings.Repeat(" ", listIDWidth), styleNone},
+			Span{padRight(truncateWidth(branch, titleWidth), titleWidth), styleDim},
+		)
 	}
 
-	reviewers := listReviewers(pr)
-	var candidates []Account
+	reviewers := pullRequestReviewers(pr)
+	var candidates []reviewerInfo
 	for _, reviewer := range reviewers {
-		if reviewer.AvatarURL() != "" {
+		if reviewer.User.AvatarURL() != "" {
 			candidates = append(candidates, reviewer)
 		}
 	}
@@ -224,9 +222,16 @@ func listMetaRow(a *app, pr *PullRequest) Row {
 		shown = listReviewerLimit
 	}
 
-	// Keep at least one cell for the branch flow. If the pane is narrow,
-	// reduce the reviewer strip before truncating the branch.
-	reviewerWidth := 0
+	spans := []Span{
+		{strings.Repeat(" ", listIDWidth), styleNone},
+		{padRight(truncateWidth(branch, titleWidth), titleWidth), styleDim},
+		{strings.Repeat(" ", listCommentWidth), styleDim},
+		{"R: ", styleDim},
+	}
+	available := a.w - spansWidth(spans)
+	if available < 0 {
+		available = 0
+	}
 	suffix := ""
 	for shown >= 0 {
 		hidden := len(reviewers) - shown
@@ -234,41 +239,28 @@ func listMetaRow(a *app, pr *PullRequest) Row {
 		if hidden > 0 {
 			suffix = fmt.Sprintf(" +%d", hidden)
 		}
-		reviewerWidth = 4 + shown*compactAvatarCols + displayWidth(suffix) // "  R:" + images + suffix
-		if len(reviewers) == 0 {
-			reviewerWidth = 0
-		}
-		if reviewerWidth == 0 || 8+1+reviewerWidth <= a.w {
+		if shown*compactAvatarCols+displayWidth(suffix) <= available {
 			break
 		}
 		shown--
 	}
 	if shown < 0 {
 		shown = 0
-		reviewerWidth = 0
 		suffix = ""
 	}
 
-	branchWidth := a.w - 8 - reviewerWidth
-	if branchWidth < 1 {
-		branchWidth = 1
-	}
-	spans := []Span{
-		{"        ", styleNone},
-		{padRight(truncateWidth(branch, branchWidth), branchWidth), styleDim},
-	}
 	row := textRow(spans...)
-	if reviewerWidth == 0 {
-		return row
-	}
-	row.Spans = append(row.Spans, Span{"  R:", styleDim})
 	for _, reviewer := range candidates[:shown] {
 		col := spansWidth(row.Spans)
 		row.Spans = append(row.Spans, Span{strings.Repeat(" ", compactAvatarCols), styleDim})
-		row.Avatars = append(row.Avatars, RowAvatar{
-			URL: reviewer.AvatarURL(), AccountID: reviewer.AccountID,
+		avatar := RowAvatar{
+			URL: reviewer.User.AvatarURL(), AccountID: reviewer.User.AccountID,
 			Col: col, Cols: compactAvatarCols, Rows: 1,
-		})
+		}
+		if reviewer.Status == reviewerApproved {
+			avatar.Badge = AvatarBadgeApproved
+		}
+		row.Avatars = append(row.Avatars, avatar)
 	}
 	if suffix != "" {
 		row.Spans = append(row.Spans, Span{suffix, styleDim})

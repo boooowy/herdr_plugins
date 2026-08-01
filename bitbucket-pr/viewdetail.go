@@ -202,38 +202,44 @@ func (v *detailView) overviewRows(a *app, d *prDetail) []Row {
 		}
 	}
 
-	// Reviewers grouped the way atlas.nvim does: Approved / Changes
-	// requested / Pending.
-	var approved, changes, pending []string
-	for _, p := range d.pr.Participants {
-		if p.Role != "REVIEWER" && !p.Approved && p.State == "" {
-			continue // silent participants stay out of the reviewer block
-		}
-		name := p.User.Name()
-		switch {
-		case p.Approved || p.State == "approved":
-			approved = append(approved, name)
-		case p.State == "changes_requested":
-			changes = append(changes, name)
-		case p.Role == "REVIEWER":
-			pending = append(pending, name)
+	reviewers := pullRequestReviewers(d.pr)
+	approvedCount := 0
+	for _, reviewer := range reviewers {
+		if reviewer.Status == reviewerApproved {
+			approvedCount++
 		}
 	}
-	total := len(approved) + len(changes) + len(pending)
+	total := len(reviewers)
 	if total > 0 {
 		rows = append(rows, textRow(), textRow(
-			Span{fmt.Sprintf(" Reviewers (%d/%d approved)", len(approved), total), styleTitle}))
-		appendGroup := func(label string, names []string, st StyleID) {
-			if len(names) == 0 {
-				return
+			Span{fmt.Sprintf(" Reviewers (%d/%d approved)", approvedCount, total), styleTitle}))
+		ordered := make([]reviewerInfo, 0, total)
+		for _, status := range []reviewerStatus{reviewerApproved, reviewerChangesRequested, reviewerPending} {
+			for _, reviewer := range reviewers {
+				if reviewer.Status == status {
+					ordered = append(ordered, reviewer)
+				}
 			}
-			rows = append(rows, textRow(
-				Span{"   " + label + ": ", st},
-				Span{joinComma(names), styleNone}))
 		}
-		appendGroup("✓ Approved", approved, styleApproved)
-		appendGroup("± Changes requested", changes, styleChangesReq)
-		appendGroup("○ Pending", pending, styleDim)
+		for _, reviewer := range ordered {
+			spans := []Span{{"   ", styleNone}}
+			name := padRight(truncateWidth(reviewer.User.Name(), 20), 20)
+			spans, avatars := appendAccountName(spans, reviewer.User, name, styleNone, styleNone, a.avatarsEnabled())
+			label, labelStyle := "○ Pending", styleDim
+			switch reviewer.Status {
+			case reviewerApproved:
+				label, labelStyle = "✓ Approved", styleApproved
+				if len(avatars) > 0 {
+					avatars[0].Badge = AvatarBadgeApproved
+				}
+			case reviewerChangesRequested:
+				label, labelStyle = "± Changes requested", styleChangesReq
+			}
+			spans = append(spans, Span{"  " + label, labelStyle})
+			reviewerRow := textRow(spans...)
+			reviewerRow.Avatars = avatars
+			rows = append(rows, reviewerRow)
+		}
 	}
 	return rows
 }
@@ -741,7 +747,7 @@ func (v *detailView) render(a *app, s *Screen) {
 
 	headerX := 1
 	if a.avatarsEnabled() && pr.Author.AvatarURL() != "" {
-		s.AddAvatar(1, 0, 4, 2, pr.Author.AvatarURL(), pr.Author.AccountID)
+		s.AddAvatar(1, 0, 4, 2, pr.Author.AvatarURL(), pr.Author.AccountID, AvatarBadgeNone)
 		headerX = 6
 	}
 	titleW := a.w - headerX - displayWidth(pr.State) - 2

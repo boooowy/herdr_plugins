@@ -489,6 +489,53 @@ func TestComposeAvatarSceneUsesCellMetricsAndTransparency(t *testing.T) {
 	}
 }
 
+func TestComposeAvatarSceneDrawsApprovedBadgeOnlyWhenRequested(t *testing.T) {
+	metrics := paneGraphicsMetrics{CellWidthPX: 9, CellHeightPX: 18}
+	compose := func(badge AvatarBadge) image.Image {
+		t.Helper()
+		data, _, _, _, err := composeAvatarScene([]renderedAvatar{{
+			cell:  AvatarCell{Cols: 2, Rows: 1, Badge: badge},
+			image: solidAvatar(color.NRGBA{R: 180, G: 20, B: 20, A: 255}),
+		}}, metrics)
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, err := png.Decode(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return img
+	}
+	hasBadgePixels := func(img image.Image) (green, white bool) {
+		for y := img.Bounds().Dy() / 2; y < img.Bounds().Dy(); y++ {
+			for x := img.Bounds().Dx() / 2; x < img.Bounds().Dx(); x++ {
+				r, g, b, _ := img.At(x, y).RGBA()
+				green = green || (g > 40000 && r < 20000 && b < 30000)
+				white = white || (r > 55000 && g > 55000 && b > 55000)
+			}
+		}
+		return green, white
+	}
+	green, white := hasBadgePixels(compose(AvatarBadgeApproved))
+	if !green || !white {
+		t.Fatalf("approved badge pixels: green=%v white=%v", green, white)
+	}
+	green, white = hasBadgePixels(compose(AvatarBadgeNone))
+	if green || white {
+		t.Fatalf("plain avatar unexpectedly has badge pixels: green=%v white=%v", green, white)
+	}
+}
+
+func TestAvatarSceneKeyIncludesBadge(t *testing.T) {
+	cell := AvatarCell{URL: "avatar", AccountID: "account", X: 1, Y: 2, Cols: 2, Rows: 1}
+	plain := avatarSceneItemKey(cell, 7)
+	cell.Badge = AvatarBadgeApproved
+	approved := avatarSceneItemKey(cell, 7)
+	if plain == approved {
+		t.Fatalf("scene keys are equal: %q", plain)
+	}
+}
+
 func TestAvatarMetadataInThreadRows(t *testing.T) {
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	thread := CommentThread{Root: Comment{ID: 1, CreatedOn: base}, Replies: []Reply{{
@@ -572,6 +619,69 @@ func TestListShowsAuthorAndReviewerAvatarsForAllVisiblePRs(t *testing.T) {
 	}
 }
 
+func TestListAccountColumnsStayAlignedAcrossContentLengths(t *testing.T) {
+	a := &app{w: 140, h: 20, avatars: &avatarGraphics{}}
+	a.prs = []PullRequest{
+		{ID: 1, Title: "short", CommentCount: 0},
+		{ID: 2, Title: strings.Repeat("long title ", 12), CommentCount: 5},
+		{ID: 3, Title: "日本語タイトル", CommentCount: 1234},
+	}
+	for i := range a.prs {
+		pr := &a.prs[i]
+		pr.Author.DisplayName = strings.Repeat("author", i+1)
+		pr.Author.AccountID = fmt.Sprintf("author-%d", i)
+		setAvatarURL(&pr.Author, fmt.Sprintf("https://example.test/author-%d.png", i))
+		pr.Source.Branch.Name = strings.Repeat("feature/", i+1)
+		pr.Destination.Branch.Name = "main"
+		reviewer := Participant{Role: "REVIEWER"}
+		reviewer.User.DisplayName = "reviewer"
+		reviewer.User.AccountID = fmt.Sprintf("reviewer-%d", i)
+		setAvatarURL(&reviewer.User, fmt.Sprintf("https://example.test/reviewer-%d.png", i))
+		pr.Participants = []Participant{reviewer}
+	}
+
+	v := &listView{}
+	v.rebuild(a)
+	wantCol := listIDWidth + listTitleMaxWidth + listCommentWidth + listRoleWidth
+	for i := range a.prs {
+		author := v.vp.Rows[i*2]
+		reviewers := v.vp.Rows[i*2+1]
+		if len(author.Avatars) != 1 || author.Avatars[0].Col != wantCol {
+			t.Errorf("PR %d author avatars = %+v, want col %d", i, author.Avatars, wantCol)
+		}
+		if len(reviewers.Avatars) != 1 || reviewers.Avatars[0].Col != wantCol {
+			t.Errorf("PR %d reviewer avatars = %+v, want col %d", i, reviewers.Avatars, wantCol)
+		}
+	}
+}
+
+func TestListNarrowLayoutShrinksReviewerStripAfterTitle(t *testing.T) {
+	a := &app{w: 24, h: 10, avatars: &avatarGraphics{}}
+	pr := PullRequest{ID: 1, Title: strings.Repeat("title", 20)}
+	pr.Author.DisplayName = "author"
+	setAvatarURL(&pr.Author, "https://example.test/author.png")
+	for i := 0; i < 6; i++ {
+		participant := Participant{Role: "REVIEWER"}
+		participant.User.DisplayName = fmt.Sprintf("reviewer-%d", i)
+		participant.User.AccountID = fmt.Sprintf("reviewer-%d", i)
+		setAvatarURL(&participant.User, fmt.Sprintf("https://example.test/reviewer-%d.png", i))
+		pr.Participants = append(pr.Participants, participant)
+	}
+	a.prs = []PullRequest{pr}
+	v := &listView{}
+	v.rebuild(a)
+	if got := listTitleWidth(a); got != 1 {
+		t.Fatalf("title width = %d, want 1", got)
+	}
+	meta := v.vp.Rows[1]
+	if len(meta.Avatars) != 1 {
+		t.Fatalf("narrow reviewer avatars = %+v", meta.Avatars)
+	}
+	if text := spansText(meta); !strings.Contains(text, "+5") {
+		t.Fatalf("narrow reviewer overflow = %q", text)
+	}
+}
+
 func TestListReviewerAvatarsAreDeduplicatedAndLimited(t *testing.T) {
 	a := &app{w: 100, h: 20, avatars: &avatarGraphics{}}
 	pr := PullRequest{ID: 1, Title: "reviewers"}
@@ -579,7 +689,10 @@ func TestListReviewerAvatarsAreDeduplicatedAndLimited(t *testing.T) {
 	pr.Author.AccountID = "author"
 	setAvatarURL(&pr.Author, "https://example.test/author.png")
 	for i := 0; i < 6; i++ {
-		participant := Participant{Role: "REVIEWER"}
+		participant := Participant{Role: "REVIEWER", Approved: i == 0, State: ""}
+		if i == 1 {
+			participant.State = "changes_requested"
+		}
 		participant.User.DisplayName = fmt.Sprintf("reviewer-%d", i)
 		participant.User.AccountID = fmt.Sprintf("reviewer-%d", i)
 		setAvatarURL(&participant.User, fmt.Sprintf("https://example.test/reviewer-%d.png", i))
@@ -593,6 +706,14 @@ func TestListReviewerAvatarsAreDeduplicatedAndLimited(t *testing.T) {
 	meta := v.vp.Rows[1]
 	if len(meta.Avatars) != listReviewerLimit {
 		t.Fatalf("reviewer avatars = %+v", meta.Avatars)
+	}
+	if meta.Avatars[0].Badge != AvatarBadgeApproved {
+		t.Errorf("approved reviewer badge = %v", meta.Avatars[0].Badge)
+	}
+	for i, avatar := range meta.Avatars[1:] {
+		if avatar.Badge != AvatarBadgeNone {
+			t.Errorf("reviewer %d badge = %v, want none", i+1, avatar.Badge)
+		}
 	}
 	var text strings.Builder
 	for _, span := range meta.Spans {
