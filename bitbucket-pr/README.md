@@ -6,7 +6,7 @@ PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメン
 （本文はいつものエディタが popup で開きます）。approve / merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
-- version: `0.16.0`
+- version: `0.17.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -15,6 +15,8 @@ Files タブでファイルを Enter すると、PR 全体の diff が**外部 d
 **選択したファイルが先頭に表示**されます。q でツールを閉じればすぐビューアに戻れます。
 インラインコメントを diff 行に埋め込み表示する**内蔵ビューア**（`v` キー）も併用でき、
 Comments タブのインラインコメントで Enter するとコード文脈へジャンプします。
+Kitty graphics 対応環境では、PR 投稿者と表示中のコメント投稿者・返信者の
+アバターもユーザー名の横に表示します。
 
 hunk とは双方向に連携します（hunk 0.13 以上）:
 
@@ -75,6 +77,30 @@ PR 更新後に位置がずれたコメント（outdated）は捨てずに、各
   内蔵ビューア（`v`）だけでも一通り使えます。コメント連携（注釈表示 / draft note 投稿）には
   hunk 0.13 以上が必要です
 
+### アバター表示（任意）
+
+アバター表示には Herdr 0.7.4 以上と、Ghostty・kitty・WezTerm など
+Kitty graphics protocol 対応ターミナルが必要です。`~/.config/herdr/config.toml` で
+Herdr の graphics layer を有効にしてください。
+
+```toml
+[experimental]
+kitty_graphics = true
+```
+
+設定後、Herdr を再起動するか `herdr server reload-config` を実行します。
+PR 一覧では選択中の PR、詳細ヘッダーでは PR 投稿者、Comments と内蔵 diff では
+画面内に表示中のルートコメント・返信の全ユーザーが対象です。画像APIや画像取得が
+利用できない場合は、自動的に従来の文字表示へ戻ります。
+
+Atlassian のプロフィール画像が「組織内のみ」公開の場合、Bitbucket REST API は
+実画像ではなくイニシャル画像を返します。後述の Jira 認証が設定されていれば、同じ
+`account_id` を Jira の安定版 User API で照会し、組織内の実画像を表示します。
+Jira 認証が未設定または取得に失敗した場合は、従来どおりBitbucketのイニシャル画像を表示します。
+
+特定ユーザーをローカル画像へ差し替える `avatar_overrides` も最優先で利用できます。
+画像は PNG / JPEG / GIF / WebP、2 MB 以下、縦横 2048 px 以下にしてください。
+
 ## インストール
 
 ```sh
@@ -103,6 +129,18 @@ API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens
 
 環境変数の代わりに `~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml` に
 `email` / `api_token` を書くこともできます（そちらが優先）。
+
+組織内限定のプロフィール画像も表示する場合は、Jira用の認証を設定します。
+
+```sh
+export JIRA_URL="https://your-company.atlassian.net"
+export JIRA_USERNAME="<Atlassianアカウントのメールアドレス>"
+export JIRA_API_TOKEN="<Jiraスコープを持つAPIトークン>"
+```
+
+3変数がすべて設定されている場合だけ `GET /rest/api/3/user?accountId=...` を使用します。
+いずれかが未設定ならJira APIは呼び出しません。Bitbucket用の
+`ATLASSIAN_API_TOKEN`はJira認証には流用しません。
 
 ## 使い方
 
@@ -176,6 +214,7 @@ default_state = "OPEN"   # 一覧の初期フィルタ
 placement = "tab"        # tab | split | zoomed | overlay — ビューア自体の配置
 list_tab_title = "PRs {repo}"  # ビューアの herdr タブ名。{repo} {workspace} が使える
 show_comments = true     # diff 内インラインコメントの初期表示
+show_avatars = true      # 対応環境で投稿者・コメント投稿者のアバターを表示
 context_fold = false     # true で内蔵ビューアの hunk を折り畳んだ状態で開く
 http_timeout_sec = 20
 
@@ -211,6 +250,11 @@ del_fg = "red"
 hunk_fg = "cyan"
 comment_fg = "white"
 outdated_fg = "yellow"
+
+# Bitbucket API がイニシャル画像を返すアカウントの任意上書き。
+# 相対パスはこの config.toml があるディレクトリを基準に解決される。
+[avatar_overrides]
+"5ecb88cb7a6cb90c2bcfec71" = "avatars/fukaya.png"
 ```
 
 ## 制限事項
@@ -227,6 +271,9 @@ outdated_fg = "yellow"
   （ヘッダは「12/48件+」のようにヒット数／取得済み件数を表示）。
 - 起動時は前回取得した一覧を即表示し、裏で最新に更新します
   （キャッシュは plugin の state ディレクトリ配下 `cache/`）。
+- アバターは中央を正方形に切り出して state ディレクトリ配下へ保存し、Bitbucket/JiraのAPI画像は24時間再利用します。
+  `avatar_overrides` の画像変更は更新時刻とサイズで検出します。上書き画像を読めない場合は
+  Bitbucket API の画像へ戻り、API画像も取得できなければ名前だけを表示します。
 - Bitbucket API の diff は大きな PR で切り詰められます（1ファイル2000行/100KB、全体8000行、200ファイル）。
   検出時は Files タブにバナーを表示します。全文はブラウザで確認してください。
 - 説明文・コメントはタブ内で Markdown レンダリングされます（見出し・箇条書き・チェックボックス・

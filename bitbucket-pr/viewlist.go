@@ -125,18 +125,35 @@ func (v *listView) rebuild(a *app) {
 			continue
 		}
 		v.shown++
-		right := fmt.Sprintf(" %s  %s", truncateWidth(pr.Author.Name(), 16), relTime(pr.UpdatedOn, now))
+		author := truncateWidth(pr.Author.Name(), 16)
+		updated := relTime(pr.UpdatedOn, now)
+		avatarW := 0
+		if a.avatarsEnabled() && pr.Author.AvatarURL() != "" {
+			avatarW = compactAvatarCols
+		}
 		badge := ""
 		if pr.CommentCount > 0 {
 			badge = fmt.Sprintf(" 💬%d", pr.CommentCount)
 		}
-		titleW := a.w - 2 - 7 - displayWidth(badge) - displayWidth(right)
-		rows = append(rows, row(RowPR, i, true,
+		rightW := 1 + avatarW + displayWidth(author) + 2 + displayWidth(updated)
+		titleW := a.w - 8 - displayWidth(badge) - rightW
+		if titleW < 1 {
+			titleW = 1
+		}
+		spans := []Span{
 			Span{fmt.Sprintf(" #%-5d ", pr.ID), styleMeta},
 			Span{padRight(pr.Title, titleW), styleNone},
 			Span{badge, styleDim},
-			Span{right, styleDim},
-		))
+			Span{" ", styleDim},
+		}
+		spans, avatars := appendAccountName(spans, pr.Author, author, styleDim, styleDim, a.avatarsEnabled())
+		spans = append(spans, Span{"  " + updated, styleDim})
+		prRow := row(RowPR, i, true, spans...)
+		for j := range avatars {
+			avatars[j].SelectedOnly = true
+		}
+		prRow.Avatars = avatars
+		rows = append(rows, prRow)
 		rows = append(rows, textRow(
 			Span{"        ", styleNone},
 			Span{pr.Source.Branch.Name + " → " + pr.Destination.Branch.Name, styleDim},

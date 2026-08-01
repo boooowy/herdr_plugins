@@ -327,7 +327,7 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	addThread := func(rows []Row, t CommentThread, label string) []Row {
 		v.threadFor[t.Root.ID] = t
 		start := len(rows)
-		rows = append(rows, threadRows(t, a.w, now, label)...)
+		rows = append(rows, threadRows(t, a.w, now, label, a.avatarsEnabled())...)
 		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
 		return rows
 	}
@@ -417,11 +417,11 @@ func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 	addThreadRows := func(t CommentThread) {
 		v.threadFor[t.Root.ID] = t
 		v.commentFor[t.Root.ID] = t.Root
-		rows = append(rows, masterThreadRow(t, width))
+		rows = append(rows, masterThreadRow(t, width, a.avatarsEnabled()))
 		for _, r := range t.Replies {
 			v.replyRoot[r.ID] = t.Root.ID
 			v.commentFor[r.ID] = r.Comment
-			rows = append(rows, masterReplyRow(r, width))
+			rows = append(rows, masterReplyRow(r, width, a.avatarsEnabled()))
 		}
 	}
 
@@ -450,7 +450,7 @@ func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 }
 
 // masterThreadRow is one left-pane thread line: "   L46 tanaka 「抜粋…」".
-func masterThreadRow(t CommentThread, width int) Row {
+func masterThreadRow(t CommentThread, width int, showAvatars bool) Row {
 	spans := []Span{{"   ", styleNone}}
 	if label := t.lineLabel(); label != "" {
 		st := styleMeta
@@ -459,24 +459,26 @@ func masterThreadRow(t CommentThread, width int) Row {
 		}
 		spans = append(spans, Span{label + " ", st})
 	}
-	spans = append(spans, Span{t.Root.User.Name(), styleAuthor})
+	spans, avatars := appendAccountName(spans, t.Root.User, t.Root.User.Name(), styleAuthor, styleNone, showAvatars)
 	if t.Root.Resolved() {
 		spans = append(spans, Span{" ✓", styleApproved})
 	}
 	spans = appendExcerptSpan(spans, t.Root, width)
-	return row(RowComment, t.Root.ID, true, spans...)
+	r := row(RowComment, t.Root.ID, true, spans...)
+	r.Avatars = avatars
+	return r
 }
 
 // masterReplyRow is one left-pane reply line: "     ↳ suzuki 「抜粋…」",
 // shifted right by nesting depth.
-func masterReplyRow(r Reply, width int) Row {
+func masterReplyRow(r Reply, width int, showAvatars bool) Row {
 	indent := "     " + strings.Repeat("  ", r.Depth-1)
-	spans := []Span{
-		{indent + "↳ ", styleDim},
-		{r.User.Name(), styleAuthor},
-	}
+	spans := []Span{{indent + "↳ ", styleDim}}
+	spans, avatars := appendAccountName(spans, r.User, r.User.Name(), styleAuthor, styleNone, showAvatars)
 	spans = appendExcerptSpan(spans, r.Comment, width)
-	return row(RowComment, r.ID, true, spans...)
+	row := row(RowComment, r.ID, true, spans...)
+	row.Avatars = avatars
+	return row
 }
 
 // appendExcerptSpan adds the 「…」 body excerpt when the remaining width
@@ -514,7 +516,7 @@ func (v *detailView) commentDetailRows(a *app, d *prDetail, key string, width in
 	v.threadSpan = map[int][2]int{}
 	addThread := func(rows []Row, t CommentThread, label string) []Row {
 		start := len(rows)
-		rows = append(rows, unselectableRows(threadRows(t, width, now, label))...)
+		rows = append(rows, unselectableRows(threadRows(t, width, now, label, a.avatarsEnabled()))...)
 		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
 		return rows
 	}
@@ -737,14 +739,23 @@ func (v *detailView) render(a *app, s *Screen) {
 	}
 	pr := d.pr
 
-	s.WriteString(1, 0, fmt.Sprintf("#%d %s", pr.ID, truncateWidth(pr.Title, a.w-14)), styleTitle, a.w)
+	headerX := 1
+	if a.avatarsEnabled() && pr.Author.AvatarURL() != "" {
+		s.AddAvatar(1, 0, 4, 2, pr.Author.AvatarURL(), pr.Author.AccountID)
+		headerX = 6
+	}
+	titleW := a.w - headerX - displayWidth(pr.State) - 2
+	if titleW < 8 {
+		titleW = 8
+	}
+	s.WriteString(headerX, 0, fmt.Sprintf("#%d %s", pr.ID, truncateWidth(pr.Title, titleW-7)), styleTitle, a.w)
 	s.WriteString(a.w-1-displayWidth(pr.State), 0, pr.State, stateStyle(pr.State), a.w)
 
 	meta := fmt.Sprintf("%s → %s (%s)  by %s  updated %s",
 		pr.Source.Branch.Name, pr.Destination.Branch.Name,
 		truncateWidth(pr.Source.Commit.Hash, 8),
 		pr.Author.Name(), relTime(pr.UpdatedOn, time.Now()))
-	s.WriteString(1, 1, truncateWidth(meta, a.w-2), styleDim, a.w)
+	s.WriteString(headerX, 1, truncateWidth(meta, a.w-headerX-1), styleDim, a.w)
 
 	// Tab bar. Counts show "…" until their fetch lands — a flash of
 	// "Files (0)" reads as an empty PR.

@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -189,4 +190,48 @@ func (c *herdrClient) pluginPaneClose(paneID string) error {
 // tabRename sets a tab's display label.
 func (c *herdrClient) tabRename(tabID, label string) error {
 	return c.call("tab.rename", map[string]any{"tab_id": tabID, "label": label}, nil)
+}
+
+// paneGraphicsMetrics is the physical size of one terminal cell. Keeping the
+// image canvas in these proportions makes a 2x1-cell avatar square on typical
+// terminals instead of stretching it vertically.
+type paneGraphicsMetrics struct {
+	CellWidthPX  int `json:"cell_width_px"`
+	CellHeightPX int `json:"cell_height_px"`
+}
+
+// paneGraphicsInfo checks that Herdr's experimental graphics layer is
+// available for paneID and returns the current cell metrics.
+func (c *herdrClient) paneGraphicsInfo(paneID string) (paneGraphicsMetrics, error) {
+	var out paneGraphicsMetrics
+	if err := c.call("pane.graphics.info", map[string]any{"pane_id": paneID}, &out); err != nil {
+		return out, err
+	}
+	if out.CellWidthPX <= 0 || out.CellHeightPX <= 0 {
+		return out, errors.New("herdr returned invalid pane graphics metrics")
+	}
+	return out, nil
+}
+
+// paneGraphicsSet replaces the pane's one graphics layer with a PNG placed
+// in viewport-cell coordinates.
+func (c *herdrClient) paneGraphicsSet(paneID string, png []byte, imageW, imageH int, placement AvatarCell) error {
+	return c.call("pane.graphics.set", map[string]any{
+		"pane_id":      paneID,
+		"format":       "png",
+		"image_width":  imageW,
+		"image_height": imageH,
+		"data_base64":  base64.StdEncoding.EncodeToString(png),
+		"placement": map[string]any{
+			"viewport_col": placement.X,
+			"viewport_row": placement.Y,
+			"grid_cols":    placement.Cols,
+			"grid_rows":    placement.Rows,
+		},
+	}, nil)
+}
+
+// paneGraphicsClear removes any image owned by the pane.
+func (c *herdrClient) paneGraphicsClear(paneID string) error {
+	return c.call("pane.graphics.clear", map[string]any{"pane_id": paneID}, nil)
 }

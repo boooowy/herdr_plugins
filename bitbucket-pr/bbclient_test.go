@@ -54,7 +54,8 @@ func TestListPRsPageReturnsNext(t *testing.T) {
 	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests", func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Query().Get("page") {
 		case "":
-			if f := r.URL.Query().Get("fields"); !strings.Contains(f, "values.title") {
+			if f := r.URL.Query().Get("fields"); !strings.Contains(f, "values.title") ||
+				!strings.Contains(f, "values.author.links.avatar.href") {
 				t.Errorf("first URL should trim the payload via fields=, got %q", f)
 			}
 			fmt.Fprintf(w, `{"values":[{"id":1},{"id":2}],"next":"%s/2.0/repositories/ws/repo/pullrequests?page=2"}`, srv.URL)
@@ -149,6 +150,46 @@ func TestRetryOnTransportError(t *testing.T) {
 	}
 	if pr.Title != "ok" || calls.Load() != 2 {
 		t.Errorf("pr=%+v calls=%d", pr, calls.Load())
+	}
+}
+
+func TestAvatarAuthIsStrippedOnCrossOriginRedirect(t *testing.T) {
+	var cdnAuth string
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cdnAuth = r.Header.Get("Authorization")
+		fmt.Fprint(w, "avatar")
+	}))
+	defer cdn.Close()
+
+	var apiAuthOK bool
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		apiAuthOK = ok && u == "u@example.com" && p == "tok"
+		http.Redirect(w, r, cdn.URL+"/image", http.StatusFound)
+	}))
+	defer api.Close()
+
+	c := testClient(api)
+	data, err := c.avatar(api.URL + "/avatar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "avatar" || !apiAuthOK {
+		t.Errorf("data=%q apiAuthOK=%v", data, apiAuthOK)
+	}
+	if cdnAuth != "" {
+		t.Errorf("authorization leaked to CDN: %q", cdnAuth)
+	}
+}
+
+func TestAvatarRejectsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, maxAvatarBytes+1))
+	}))
+	defer srv.Close()
+	c := testClient(srv)
+	if _, err := c.avatar(srv.URL + "/avatar"); err == nil {
+		t.Error("oversized avatar body must fail")
 	}
 }
 

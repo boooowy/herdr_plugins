@@ -9,6 +9,12 @@ type Account struct {
 	DisplayName string `json:"display_name"`
 	Nickname    string `json:"nickname"`
 	UUID        string `json:"uuid"`
+	AccountID   string `json:"account_id"`
+	Links       struct {
+		Avatar struct {
+			Href string `json:"href"`
+		} `json:"avatar"`
+	} `json:"links"`
 }
 
 // Name returns the best human label for the account.
@@ -21,6 +27,9 @@ func (a Account) Name() string {
 	}
 	return "Unknown"
 }
+
+// AvatarURL returns the account's Bitbucket-provided thumbnail URL.
+func (a Account) AvatarURL() string { return a.Links.Avatar.Href }
 
 // PRRef is one endpoint of a pull request (source or destination).
 type PRRef struct {
