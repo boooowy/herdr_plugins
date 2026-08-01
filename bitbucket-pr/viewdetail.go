@@ -49,6 +49,18 @@ type detailView struct {
 	// pendingDelete is a comment ID waiting for the y-key confirmation of
 	// `x` (0 = none).
 	pendingDelete int
+
+	// search holds one `/` filter per tab (Overview has none); shownFiles is
+	// how many files the Files filter lets through, for the tab-bar count.
+	search     [tabCount]searchBox
+	shownFiles int
+}
+
+// visibleComments applies the Comments tab's filter. Every comment renderer
+// goes through here so both layouts and the preview pane agree on what is
+// visible.
+func (v *detailView) visibleComments(d *prDetail) []Comment {
+	return filterComments(d.comments, v.search[tabComments].query())
 }
 
 // cmtGroup marks a Comments-tab master-list group header row: a file with
@@ -237,7 +249,15 @@ func (v *detailView) fileRows(a *app, d *prDetail) []Row {
 			commentCount[c.Inline.Path]++
 		}
 	}
+	q := v.search[tabFiles].query()
+	v.shownFiles = 0
+	// Row.Item stays the index into d.diffstat: Enter and v resolve the file
+	// through it, so filtered rows must not be renumbered.
 	for i, st := range d.diffstat {
+		if !matchQuery(q, st.Path(), st.OldPath()) {
+			continue
+		}
+		v.shownFiles++
 		mark, style := statusMark(st.Status)
 		path := st.Path()
 		if st.Status == "renamed" && st.OldPath() != "" {
@@ -257,8 +277,12 @@ func (v *detailView) fileRows(a *app, d *prDetail) []Row {
 			Span{fmt.Sprintf(" -%d", st.LinesRemoved), styleChangesReq},
 		))
 	}
-	if len(rows) == 0 && a.loading == 0 {
-		rows = append(rows, textRow(Span{" (変更ファイルはありません)", styleDim}))
+	if v.shownFiles == 0 && a.loading == 0 {
+		msg := " (変更ファイルはありません)"
+		if q != "" {
+			msg = " (一致するファイルはありません)"
+		}
+		rows = append(rows, textRow(Span{msg, styleDim}))
 	}
 	return rows
 }
@@ -266,8 +290,9 @@ func (v *detailView) fileRows(a *app, d *prDetail) []Row {
 func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	var rows []Row
 	now := time.Now()
-	general := generalThreads(d.comments)
-	byFile := inlineThreadsByFile(d.comments)
+	cs := v.visibleComments(d)
+	general := generalThreads(cs)
+	byFile := inlineThreadsByFile(cs)
 	v.inlineThreadFor = map[int]CommentThread{}
 	v.threadFor = map[int]CommentThread{}
 	v.threadSpan = map[int][2]int{}
@@ -280,7 +305,11 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	}
 	if len(general) == 0 && inlineTotal == 0 {
 		if a.loading == 0 {
-			rows = append(rows, textRow(Span{" (コメントはありません)", styleDim}))
+			msg := " (コメントはありません)"
+			if v.search[tabComments].query() != "" {
+				msg = " (一致するコメントはありません)"
+			}
+			rows = append(rows, textRow(Span{msg, styleDim}))
 		}
 		return rows
 	}
@@ -358,8 +387,9 @@ func appendFileCommentRows(rows []Row, f *FileDiff, threads []CommentThread, wid
 // (PR comments / one per file) with their threads indented underneath.
 func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 	var rows []Row
-	general := generalThreads(d.comments)
-	byFile := inlineThreadsByFile(d.comments)
+	cs := v.visibleComments(d)
+	general := generalThreads(cs)
+	byFile := inlineThreadsByFile(cs)
 	v.inlineThreadFor = map[int]CommentThread{}
 	v.threadFor = map[int]CommentThread{}
 	v.cmtFirstThread = map[string]int{}
@@ -373,7 +403,11 @@ func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 	}
 	if len(general) == 0 && inlineTotal == 0 {
 		if a.loading == 0 {
-			rows = append(rows, textRow(Span{" (コメントはありません)", styleDim}))
+			msg := " (コメントはありません)"
+			if v.search[tabComments].query() != "" {
+				msg = " (一致するコメントはありません)"
+			}
+			rows = append(rows, textRow(Span{msg, styleDim}))
 		}
 		return rows
 	}
@@ -485,16 +519,17 @@ func (v *detailView) commentDetailRows(a *app, d *prDetail, key string, width in
 		return rows
 	}
 
+	cs := v.visibleComments(d)
 	if key == generalPreviewKey {
 		rows = append(rows, textRow(Span{" 💬 ", styleNone}, Span{"PR コメント", styleTitle}), textRow())
-		for _, t := range generalThreads(d.comments) {
+		for _, t := range generalThreads(cs) {
 			rows = addThread(rows, t, "")
 		}
 		return rows
 	}
 	rows = append(rows, textRow(Span{" 📄 ", styleNone}, Span{truncateWidth(key, width-5), styleTitle}), textRow())
 	return appendFileCommentRows(rows, fileDiffFor(d.files, key),
-		inlineThreadsByFile(d.comments)[key], width, addThread)
+		inlineThreadsByFile(cs)[key], width, addThread)
 }
 
 // syncPreview aligns the right pane with the master cursor: rebuilds it
@@ -713,12 +748,20 @@ func (v *detailView) render(a *app, s *Screen) {
 
 	// Tab bar. Counts show "…" until their fetch lands — a flash of
 	// "Files (0)" reads as an empty PR.
+	// A filtered tab reads "12/230" so the hidden entries stay accounted for.
 	filesCount, commentsCount := "…", "…"
 	if d.diffstat != nil {
 		filesCount = fmt.Sprintf("%d", len(d.diffstat))
+		if v.search[tabFiles].query() != "" {
+			filesCount = fmt.Sprintf("%d/%d", v.shownFiles, len(d.diffstat))
+		}
 	}
 	if d.comments != nil {
-		commentsCount = fmt.Sprintf("%d", commentThreadCount(d.comments))
+		total := commentThreadCount(d.comments)
+		commentsCount = fmt.Sprintf("%d", total)
+		if v.search[tabComments].query() != "" {
+			commentsCount = fmt.Sprintf("%d/%d", commentThreadCount(v.visibleComments(d)), total)
+		}
 	}
 	labels := []string{
 		"1:Overview",
@@ -779,18 +822,34 @@ func stateStyle(state string) StyleID {
 	}
 }
 
-// interceptEsc cancels a pending x-delete instead of popping the view.
+// grabsKeys routes every key to handle while this tab's filter prompt is open.
+func (v *detailView) grabsKeys() bool { return v.search[v.tab].active }
+
+// interceptEsc cancels a pending x-delete or clears this tab's filter
+// instead of popping the view.
 func (v *detailView) interceptEsc(a *app) bool {
-	if v.pendingDelete == 0 {
-		return false
+	if v.pendingDelete != 0 {
+		v.pendingDelete = 0
+		a.status = "削除を取り消しました"
+		return true
 	}
-	v.pendingDelete = 0
-	a.status = "削除を取り消しました"
-	return true
+	if v.search[v.tab].query() != "" {
+		v.search[v.tab].clear()
+		v.rebuild(a)
+		a.status = "絞り込みを解除しました"
+		return true
+	}
+	return false
 }
 
 func (v *detailView) handle(a *app, k Key) {
 	vp := &v.vp[v.tab]
+	if v.search[v.tab].active {
+		if v.search[v.tab].handle(k) {
+			v.rebuild(a)
+		}
+		return
+	}
 	// A pending x-delete consumes the next key: y confirms, anything else
 	// cancels.
 	if v.pendingDelete != 0 {
@@ -806,6 +865,8 @@ func (v *detailView) handle(a *app, k Key) {
 		return
 	}
 	switch {
+	case isKey(k, '/') && v.tab != tabOverview:
+		v.search[v.tab].open()
 	case k.Kind == KeyTab || (k.Kind == KeyRune && k.R == '\t'):
 		v.tab = (v.tab + 1) % tabCount
 		v.rebuild(a)
@@ -971,6 +1032,9 @@ func (v *detailView) handle(a *app, k Key) {
 }
 
 func (v *detailView) footer(a *app) string {
+	if v.search[v.tab].active {
+		return v.search[v.tab].prompt()
+	}
 	base := "Tab/h/l:タブ  j/k:移動  "
 	if v.tab == tabFiles {
 		if a.cfg.FilesEnter == "builtin" {
@@ -1002,7 +1066,17 @@ func (v *detailView) footer(a *app) string {
 		}
 		base += "x:削除  " + sKey + "  "
 	}
-	return base + cKey + "  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
+	tail := "  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
+	switch q := v.search[v.tab].query(); {
+	case q != "":
+		// q clears the filter here too (the app routes q and Esc alike), so
+		// the hint must not promise that q goes back.
+		base += "/:" + q + "  q/Esc:絞込解除  "
+		tail = "  D:PR全体diff  r:再読込  o:ブラウザ"
+	case v.tab != tabOverview:
+		base += "/:絞り込み  "
+	}
+	return base + cKey + tail
 }
 
 // replyTarget names where a reply will land: "返信→tanaka L15".

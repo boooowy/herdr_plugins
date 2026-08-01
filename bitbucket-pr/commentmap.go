@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Reply is one reply inside a thread with its nesting depth (1 = a direct
@@ -126,6 +127,49 @@ func inlineThreadsByFile(comments []Comment) map[string][]CommentThread {
 		byFile[t.Root.Inline.Path] = append(byFile[t.Root.Inline.Path], t)
 	}
 	return byFile
+}
+
+// filterComments keeps only the comments whose THREAD matches q: a hit on
+// the root body, any reply body, an author name, the file path or the line
+// label keeps the whole thread, so a matching reply never shows up without
+// the comment it answers. The result preserves the input order, which lets
+// every Comments-tab renderer work as if the PR simply had fewer comments.
+func filterComments(cs []Comment, q string) []Comment {
+	if strings.TrimSpace(q) == "" {
+		return cs
+	}
+	keep := make(map[int]bool)
+	consider := func(t CommentThread) {
+		fields := []string{t.Root.Content.Raw, t.Root.User.Name(), t.lineLabel()}
+		if t.Root.Inline != nil {
+			fields = append(fields, t.Root.Inline.Path)
+		}
+		for _, r := range t.Replies {
+			fields = append(fields, r.Content.Raw, r.User.Name())
+		}
+		if !matchQuery(q, fields...) {
+			return
+		}
+		keep[t.Root.ID] = true
+		for _, r := range t.Replies {
+			keep[r.ID] = true
+		}
+	}
+	for _, t := range generalThreads(cs) {
+		consider(t)
+	}
+	for _, ts := range inlineThreadsByFile(cs) {
+		for _, t := range ts {
+			consider(t)
+		}
+	}
+	out := make([]Comment, 0, len(cs))
+	for _, c := range cs {
+		if keep[c.ID] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // anchor returns which diff side and line the thread points at: to (new

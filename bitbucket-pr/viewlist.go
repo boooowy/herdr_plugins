@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -12,6 +13,11 @@ var prStates = []string{"OPEN", "MERGED", "DECLINED", "SUPERSEDED"}
 // with the branch flow underneath.
 type listView struct {
 	vp Viewport
+
+	// search is the `/` filter over the pages fetched so far; shown counts
+	// the PRs it lets through (for the header's "12/48件").
+	search searchBox
+	shown  int
 }
 
 func newListView(a *app) *listView {
@@ -104,12 +110,21 @@ func (v *listView) loadMore(a *app) {
 	})
 }
 
-// rebuild regenerates the viewport rows from the cached list.
+// rebuild regenerates the viewport rows from the cached list, honouring the
+// `/` filter. Row.Item stays the index into a.prs — Enter/o/y/b resolve the
+// PR through it, so filtered rows must not be renumbered.
 func (v *listView) rebuild(a *app) {
 	now := time.Now()
+	q := v.search.query()
 	rows := make([]Row, 0, len(a.prs)*2)
+	v.shown = 0
 	for i := range a.prs {
 		pr := &a.prs[i]
+		if !matchQuery(q, "#"+strconv.Itoa(pr.ID), pr.Title, pr.Author.Name(),
+			pr.Source.Branch.Name, pr.Destination.Branch.Name) {
+			continue
+		}
+		v.shown++
 		right := fmt.Sprintf(" %s  %s", truncateWidth(pr.Author.Name(), 16), relTime(pr.UpdatedOn, now))
 		badge := ""
 		if pr.CommentCount > 0 {
@@ -127,17 +142,33 @@ func (v *listView) rebuild(a *app) {
 			Span{pr.Source.Branch.Name + " → " + pr.Destination.Branch.Name, styleDim},
 		))
 	}
-	if len(a.prs) == 0 {
+	if v.shown == 0 {
 		switch {
 		case a.loading > 0:
 			rows = append(rows, textRow(Span{" 読み込み中…", styleDim}))
 		case a.prsErr != "":
 			rows = append(rows, textRow(Span{" 取得に失敗しました（r で再読込）: " + a.prsErr, styleDim}))
+		case q != "":
+			rows = append(rows, textRow(Span{" (一致する PR はありません)", styleDim}))
 		default:
 			rows = append(rows, textRow(Span{" (" + a.prsState + " のPRはありません)", styleDim}))
 		}
 	}
 	v.vp.Reset(rows)
+	v.fillFilter(a)
+}
+
+// fillFilter keeps pulling pages while a filter is on: the filter only sees
+// what has been fetched, and the cursor-near-the-end trigger in handle never
+// fires when few rows match. Each arriving page rebuilds and re-checks, so
+// this stops on its own once the screen is full or the list is exhausted.
+func (v *listView) fillFilter(a *app) {
+	if v.search.query() == "" || a.prsNext == "" {
+		return
+	}
+	if v.shown*2 < v.vp.H+2 { // two rows per PR
+		v.loadMore(a)
+	}
 }
 
 func (v *listView) render(a *app, s *Screen) {
@@ -150,17 +181,46 @@ func (v *listView) render(a *app, s *Screen) {
 		x = s.WriteString(x, 0, st, style, a.w)
 		x = s.WriteString(x, 0, "  ", styleNone, a.w)
 	}
+	q := v.search.query()
 	count := fmt.Sprintf("%d件", len(a.prs))
+	if q != "" {
+		count = fmt.Sprintf("%d/%d件", v.shown, len(a.prs))
+	}
 	if a.prsNext != "" {
 		count += "+" // more pages on the server, fetched as the cursor nears the end
 	}
-	s.WriteString(x, 0, count, styleDim, a.w)
+	x = s.WriteString(x, 0, count, styleDim, a.w)
+	if q != "" {
+		s.WriteString(x, 0, "  /"+q, styleMeta, a.w)
+	}
 	paintSeparator(s, 1, a.w)
 	v.vp.Paint(s, a.contentRect())
 }
 
+// grabsKeys routes every key to handle while the filter prompt is open.
+func (v *listView) grabsKeys() bool { return v.search.active }
+
+// interceptEsc clears an applied filter instead of leaving the viewer.
+func (v *listView) interceptEsc(a *app) bool {
+	if v.search.query() == "" {
+		return false
+	}
+	v.search.clear()
+	v.rebuild(a)
+	a.status = "絞り込みを解除しました"
+	return true
+}
+
 func (v *listView) handle(a *app, k Key) {
+	if v.search.active {
+		if v.search.handle(k) {
+			v.rebuild(a)
+		}
+		return
+	}
 	switch {
+	case isKey(k, '/'):
+		v.search.open()
 	case isKey(k, 'j') || k.Kind == KeyDown:
 		v.vp.MoveCursor(1)
 	case isKey(k, 'k') || k.Kind == KeyUp:
@@ -225,7 +285,15 @@ func (v *listView) cycleState(a *app, dir int) {
 }
 
 func (v *listView) footer(a *app) string {
-	return "j/k:移動  Enter:開く  Tab/s:state切替  y:URL  b:ブランチ  r:再読込  o:ブラウザ  q:終了"
+	if v.search.active {
+		return v.search.prompt()
+	}
+	if q := v.search.query(); q != "" {
+		// q clears the filter here too (the app routes q and Esc alike), so
+		// the hint must not promise that q quits.
+		return "j/k:移動  Enter:開く  /:" + q + "  q/Esc:絞込解除  r:再読込  o:ブラウザ"
+	}
+	return "j/k:移動  Enter:開く  Tab/s:state切替  /:絞り込み  y:URL  b:ブランチ  r:再読込  q:終了"
 }
 
 // isKey reports whether k is the plain rune r.
