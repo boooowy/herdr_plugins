@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -84,6 +86,19 @@ func TestAvatarDiskCacheRoundTrip(t *testing.T) {
 	img, fresh := store.loadDisk(path)
 	if img == nil || !fresh || img.Bounds() != image.Rect(0, 0, avatarCachePixels, avatarCachePixels) {
 		t.Errorf("img=%v fresh=%v", img, fresh)
+	}
+}
+
+func TestInitialsAvatarURLIncludesNestedGravatarDefault(t *testing.T) {
+	rawURL := "https://secure.gravatar.com/avatar/hash?d=https%3A%2F%2Favatar-management.example%2Finitials%2FK-0.png"
+	if !isInitialsAvatarURL(rawURL) {
+		t.Fatal("nested Gravatar initials fallback must be eligible for Jira resolution")
+	}
+	if isDirectInitialsAvatarURL(rawURL) {
+		t.Fatal("a Gravatar URL returned by Jira must remain a cacheable resolved image")
+	}
+	if isInitialsAvatarURL("https://cdn.example.test/custom/avatar.png") {
+		t.Fatal("ordinary avatar URL must not be treated as initials")
 	}
 }
 
@@ -252,6 +267,203 @@ func TestAvatarStoreKeepsBitbucketInitialsWhenJiraFails(t *testing.T) {
 	}
 }
 
+func waitForAvatarSnapshots(t *testing.T, store *avatarStore, cells []AvatarCell) []avatarSnapshot {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		snapshots := store.images(cells)
+		ready := len(snapshots) == len(cells)
+		for _, snapshot := range snapshots {
+			if snapshot.image == nil {
+				ready = false
+				break
+			}
+		}
+		store.mu.Lock()
+		for _, cell := range cells {
+			if entry := store.entries[store.source(cell.AccountID, cell.URL).key]; entry == nil || entry.loading {
+				ready = false
+				break
+			}
+		}
+		store.mu.Unlock()
+		if ready {
+			return snapshots
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for avatar images")
+		}
+		select {
+		case <-store.ready:
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestAvatarStoreBulkResolvesAndRevalidatesPersistentCache(t *testing.T) {
+	avatarData := encodeAvatar(t, color.NRGBA{G: 255, A: 255})
+	var jiraCalls, imageCalls atomic.Int32
+	var resolvedPrefix atomic.Value
+	resolvedPrefix.Store("https://cdn.example.test/v1/")
+
+	bb := newBBClient("bb@example.com", "bb-token", time.Second)
+	bb.http.Transport = avatarRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		imageCalls.Add(1)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(avatarData)),
+			Request:    req,
+		}, nil
+	})
+	jira, err := newJiraClient("https://jira.example.test", "jira@example.com", "jira-token", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jira.http.Transport = avatarRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		jiraCalls.Add(1)
+		values := make([]map[string]any, 0)
+		for _, accountID := range req.URL.Query()["accountId"] {
+			values = append(values, map[string]any{
+				"accountId":  accountID,
+				"avatarUrls": map[string]string{"48x48": resolvedPrefix.Load().(string) + accountID + ".png"},
+			})
+		}
+		body, marshalErr := json.Marshal(map[string]any{"values": values})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+
+	dir := t.TempDir()
+	var cells []AvatarCell
+	for i := 0; i < jiraBulkMaxUsers+1; i++ {
+		cells = append(cells, AvatarCell{
+			AccountID: fmt.Sprintf("account-%d", i),
+			URL:       fmt.Sprintf("https://bb.example.test/initials/A-%d.png", i),
+		})
+	}
+	store := newAvatarStore(bb, jira, nil)
+	store.dir = dir
+	waitForAvatarSnapshots(t, store, cells)
+	if jiraCalls.Load() != 2 || imageCalls.Load() != int32(len(cells)) {
+		t.Fatalf("cold cache calls: Jira=%d images=%d", jiraCalls.Load(), imageCalls.Load())
+	}
+
+	// A new process uses the PNG and metadata without any network request.
+	warm := newAvatarStore(bb, jira, nil)
+	warm.dir = dir
+	waitForAvatarSnapshots(t, warm, cells)
+	if jiraCalls.Load() != 2 || imageCalls.Load() != int32(len(cells)) {
+		t.Fatalf("warm cache calls: Jira=%d images=%d", jiraCalls.Load(), imageCalls.Load())
+	}
+
+	// After 30 days the account URLs are checked in one bulk request. When
+	// unchanged, the indefinitely retained PNGs are not downloaded again.
+	old := time.Now().Add(-avatarCacheTTL - time.Hour)
+	for _, cell := range cells {
+		source := warm.source(cell.AccountID, cell.URL)
+		warm.saveMeta(source.key, avatarCacheMeta{
+			ResolvedURL: resolvedPrefix.Load().(string) + cell.AccountID + ".png",
+			CheckedAt:   old,
+		})
+	}
+	revalidate := newAvatarStore(bb, jira, nil)
+	revalidate.dir = dir
+	waitForAvatarSnapshots(t, revalidate, cells)
+	if jiraCalls.Load() != 4 || imageCalls.Load() != int32(len(cells)) {
+		t.Fatalf("unchanged revalidation calls: Jira=%d images=%d", jiraCalls.Load(), imageCalls.Load())
+	}
+
+	// A changed Jira URL replaces only the affected cached image data.
+	resolvedPrefix.Store("https://cdn.example.test/v2/")
+	for _, cell := range cells {
+		source := revalidate.source(cell.AccountID, cell.URL)
+		revalidate.saveMeta(source.key, avatarCacheMeta{
+			ResolvedURL: "https://cdn.example.test/v1/" + cell.AccountID + ".png",
+			CheckedAt:   old,
+		})
+	}
+	changed := newAvatarStore(bb, jira, nil)
+	changed.dir = dir
+	waitForAvatarSnapshots(t, changed, cells)
+	if jiraCalls.Load() != 6 || imageCalls.Load() != int32(len(cells)*2) {
+		t.Fatalf("changed revalidation calls: Jira=%d images=%d", jiraCalls.Load(), imageCalls.Load())
+	}
+}
+
+func TestAvatarStoreMigratesLegacyJiraPNGWithoutNetwork(t *testing.T) {
+	var jiraCalls atomic.Int32
+	bb := newBBClient("bb@example.com", "bb-token", time.Second)
+	jira, err := newJiraClient("https://jira.example.test", "jira@example.com", "jira-token", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jira.http.Transport = avatarRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		jiraCalls.Add(1)
+		return nil, fmt.Errorf("legacy cache should suppress Jira lookup")
+	})
+
+	dir := t.TempDir()
+	cell := AvatarCell{AccountID: "legacy", URL: "https://bb.example.test/initials/L-1.png"}
+	writer := newAvatarStore(bb, jira, nil)
+	writer.dir = dir
+	source := writer.source(cell.AccountID, cell.URL)
+	if !writer.saveDisk(writer.cachePath(source.key), solidAvatar(color.NRGBA{R: 255, A: 255})) {
+		t.Fatal("failed to create legacy cache PNG")
+	}
+
+	store := newAvatarStore(bb, jira, nil)
+	store.dir = dir
+	waitForAvatarSnapshots(t, store, []AvatarCell{cell})
+	if jiraCalls.Load() != 0 {
+		t.Fatalf("Jira calls = %d", jiraCalls.Load())
+	}
+	meta, ok := store.loadMeta(source.key)
+	if !ok || meta.CheckedAt.IsZero() || meta.ResolvedURL != "" {
+		t.Fatalf("legacy metadata = %+v, ok=%v", meta, ok)
+	}
+}
+
+func TestAvatarStoreLimitsConcurrentDownloads(t *testing.T) {
+	avatarData := encodeAvatar(t, color.NRGBA{B: 255, A: 255})
+	var active, maximum atomic.Int32
+	bb := newBBClient("bb@example.com", "bb-token", time.Second)
+	bb.http.Transport = avatarRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		current := active.Add(1)
+		for {
+			previous := maximum.Load()
+			if current <= previous || maximum.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		active.Add(-1)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(avatarData)),
+			Request:    req,
+		}, nil
+	})
+	store := newAvatarStore(bb, nil, nil)
+	store.dir = t.TempDir()
+	var cells []AvatarCell
+	for i := 0; i < avatarDownloadConcurrent*2; i++ {
+		cells = append(cells, AvatarCell{URL: fmt.Sprintf("https://cdn.example.test/%d.png", i)})
+	}
+	waitForAvatarSnapshots(t, store, cells)
+	if got := maximum.Load(); got < 2 || got > avatarDownloadConcurrent {
+		t.Fatalf("maximum concurrent downloads = %d", got)
+	}
+}
+
 func TestComposeAvatarSceneUsesCellMetricsAndTransparency(t *testing.T) {
 	avatars := []renderedAvatar{
 		{cell: AvatarCell{X: 2, Y: 1, Cols: 2, Rows: 1}, image: solidAvatar(color.NRGBA{R: 255, A: 255})},
@@ -319,22 +531,75 @@ func TestViewportSelectedOnlyAvatar(t *testing.T) {
 	}
 }
 
-func TestListShowsAvatarOnlyForSelectedPR(t *testing.T) {
+func TestViewportOnlyEmitsAvatarsForVisibleRows(t *testing.T) {
+	rows := []Row{
+		{Avatars: []RowAvatar{{URL: "visible", Cols: 2, Rows: 1}}},
+		{Avatars: []RowAvatar{{URL: "offscreen", Cols: 2, Rows: 1}}},
+	}
+	v := Viewport{Rows: rows, Cursor: -1}
+	s := NewScreen(20, 2)
+	v.Paint(s, Rect{X: 0, Y: 0, W: 20, H: 1})
+	if len(s.Avatars()) != 1 || s.Avatars()[0].URL != "visible" {
+		t.Fatalf("visible avatars = %+v", s.Avatars())
+	}
+}
+
+func TestListShowsAuthorAndReviewerAvatarsForAllVisiblePRs(t *testing.T) {
 	a := &app{w: 100, h: 20, avatars: &avatarGraphics{}}
 	a.prs = []PullRequest{{ID: 1, Title: "one"}, {ID: 2, Title: "two"}}
 	for i := range a.prs {
 		a.prs[i].Author.DisplayName = "author"
-		setAvatarURL(&a.prs[i].Author, "https://example.test/avatar.png")
+		a.prs[i].Author.AccountID = fmt.Sprintf("author-%d", i)
+		setAvatarURL(&a.prs[i].Author, fmt.Sprintf("https://example.test/author-%d.png", i))
+		reviewer := Participant{Role: "REVIEWER"}
+		reviewer.User.DisplayName = "reviewer"
+		reviewer.User.AccountID = fmt.Sprintf("reviewer-%d", i)
+		setAvatarURL(&reviewer.User, fmt.Sprintf("https://example.test/reviewer-%d.png", i))
+		a.prs[i].Participants = []Participant{reviewer}
 	}
 	v := &listView{}
 	v.rebuild(a)
-	if len(v.vp.Rows[0].Avatars) != 1 || !v.vp.Rows[0].Avatars[0].SelectedOnly {
-		t.Fatalf("row avatar = %+v", v.vp.Rows[0].Avatars)
+	if len(v.vp.Rows[0].Avatars) != 1 || v.vp.Rows[0].Avatars[0].SelectedOnly {
+		t.Fatalf("author avatar = %+v", v.vp.Rows[0].Avatars)
+	}
+	if len(v.vp.Rows[1].Avatars) != 1 || v.vp.Rows[1].Avatars[0].AccountID != "reviewer-0" {
+		t.Fatalf("reviewer avatar = %+v", v.vp.Rows[1].Avatars)
 	}
 	s := NewScreen(a.w, a.h)
 	v.vp.Paint(s, Rect{X: 0, Y: 2, W: a.w, H: a.h - 3})
-	if len(s.Avatars()) != 1 {
+	if len(s.Avatars()) != 4 {
 		t.Errorf("visible avatars = %+v", s.Avatars())
+	}
+}
+
+func TestListReviewerAvatarsAreDeduplicatedAndLimited(t *testing.T) {
+	a := &app{w: 100, h: 20, avatars: &avatarGraphics{}}
+	pr := PullRequest{ID: 1, Title: "reviewers"}
+	pr.Author.DisplayName = "author"
+	pr.Author.AccountID = "author"
+	setAvatarURL(&pr.Author, "https://example.test/author.png")
+	for i := 0; i < 6; i++ {
+		participant := Participant{Role: "REVIEWER"}
+		participant.User.DisplayName = fmt.Sprintf("reviewer-%d", i)
+		participant.User.AccountID = fmt.Sprintf("reviewer-%d", i)
+		setAvatarURL(&participant.User, fmt.Sprintf("https://example.test/reviewer-%d.png", i))
+		pr.Participants = append(pr.Participants, participant)
+	}
+	pr.Participants = append(pr.Participants, pr.Participants[0], Participant{Role: "PARTICIPANT", User: pr.Participants[1].User})
+	a.prs = []PullRequest{pr}
+
+	v := &listView{}
+	v.rebuild(a)
+	meta := v.vp.Rows[1]
+	if len(meta.Avatars) != listReviewerLimit {
+		t.Fatalf("reviewer avatars = %+v", meta.Avatars)
+	}
+	var text strings.Builder
+	for _, span := range meta.Spans {
+		text.WriteString(span.Text)
+	}
+	if !strings.Contains(text.String(), "+2") {
+		t.Errorf("reviewer overflow missing: %q", text.String())
 	}
 }
 

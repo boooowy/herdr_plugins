@@ -25,8 +25,8 @@ type Span struct {
 
 // RowAvatar places one account image relative to the beginning of a row.
 // The row text reserves Cols cells at Col so the graphics layer never covers
-// useful text. SelectedOnly is used by the PR list, where only the cursor row
-// gets an image even though every row keeps the author column aligned.
+// useful text. SelectedOnly is available to views that intentionally limit an
+// image to the cursor row.
 type RowAvatar struct {
 	URL          string
 	AccountID    string

@@ -3,11 +3,14 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // prStates is the `s` key's filter cycle.
 var prStates = []string{"OPEN", "MERGED", "DECLINED", "SUPERSEDED"}
+
+const listReviewerLimit = 4
 
 // listView is the PR list: one selectable row per PR plus a muted meta row
 // with the branch flow underneath.
@@ -149,15 +152,9 @@ func (v *listView) rebuild(a *app) {
 		spans, avatars := appendAccountName(spans, pr.Author, author, styleDim, styleDim, a.avatarsEnabled())
 		spans = append(spans, Span{"  " + updated, styleDim})
 		prRow := row(RowPR, i, true, spans...)
-		for j := range avatars {
-			avatars[j].SelectedOnly = true
-		}
 		prRow.Avatars = avatars
 		rows = append(rows, prRow)
-		rows = append(rows, textRow(
-			Span{"        ", styleNone},
-			Span{pr.Source.Branch.Name + " → " + pr.Destination.Branch.Name, styleDim},
-		))
+		rows = append(rows, listMetaRow(a, pr))
 	}
 	if v.shown == 0 {
 		switch {
@@ -173,6 +170,110 @@ func (v *listView) rebuild(a *app) {
 	}
 	v.vp.Reset(rows)
 	v.fillFilter(a)
+}
+
+func listReviewers(pr *PullRequest) []Account {
+	seen := make(map[string]struct{})
+	authorKey := accountKey(pr.Author)
+	var reviewers []Account
+	for _, participant := range pr.Participants {
+		if participant.Role != "REVIEWER" {
+			continue
+		}
+		key := accountKey(participant.User)
+		if key == "" || key == authorKey {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		reviewers = append(reviewers, participant.User)
+	}
+	return reviewers
+}
+
+func accountKey(account Account) string {
+	if account.AccountID != "" {
+		return "id:" + account.AccountID
+	}
+	if account.UUID != "" {
+		return "uuid:" + account.UUID
+	}
+	if name := account.Name(); name != "Unknown" {
+		return "name:" + name
+	}
+	return ""
+}
+
+func listMetaRow(a *app, pr *PullRequest) Row {
+	branch := pr.Source.Branch.Name + " → " + pr.Destination.Branch.Name
+	if !a.avatarsEnabled() {
+		return textRow(Span{"        ", styleNone}, Span{branch, styleDim})
+	}
+
+	reviewers := listReviewers(pr)
+	var candidates []Account
+	for _, reviewer := range reviewers {
+		if reviewer.AvatarURL() != "" {
+			candidates = append(candidates, reviewer)
+		}
+	}
+	shown := len(candidates)
+	if shown > listReviewerLimit {
+		shown = listReviewerLimit
+	}
+
+	// Keep at least one cell for the branch flow. If the pane is narrow,
+	// reduce the reviewer strip before truncating the branch.
+	reviewerWidth := 0
+	suffix := ""
+	for shown >= 0 {
+		hidden := len(reviewers) - shown
+		suffix = ""
+		if hidden > 0 {
+			suffix = fmt.Sprintf(" +%d", hidden)
+		}
+		reviewerWidth = 4 + shown*compactAvatarCols + displayWidth(suffix) // "  R:" + images + suffix
+		if len(reviewers) == 0 {
+			reviewerWidth = 0
+		}
+		if reviewerWidth == 0 || 8+1+reviewerWidth <= a.w {
+			break
+		}
+		shown--
+	}
+	if shown < 0 {
+		shown = 0
+		reviewerWidth = 0
+		suffix = ""
+	}
+
+	branchWidth := a.w - 8 - reviewerWidth
+	if branchWidth < 1 {
+		branchWidth = 1
+	}
+	spans := []Span{
+		{"        ", styleNone},
+		{padRight(truncateWidth(branch, branchWidth), branchWidth), styleDim},
+	}
+	row := textRow(spans...)
+	if reviewerWidth == 0 {
+		return row
+	}
+	row.Spans = append(row.Spans, Span{"  R:", styleDim})
+	for _, reviewer := range candidates[:shown] {
+		col := spansWidth(row.Spans)
+		row.Spans = append(row.Spans, Span{strings.Repeat(" ", compactAvatarCols), styleDim})
+		row.Avatars = append(row.Avatars, RowAvatar{
+			URL: reviewer.AvatarURL(), AccountID: reviewer.AccountID,
+			Col: col, Cols: compactAvatarCols, Rows: 1,
+		})
+	}
+	if suffix != "" {
+		row.Spans = append(row.Spans, Span{suffix, styleDim})
+	}
+	return row
 }
 
 // fillFilter keeps pulling pages while a filter is on: the filter only sees

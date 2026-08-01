@@ -6,7 +6,7 @@ PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメン
 （本文はいつものエディタが popup で開きます）。approve / merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
-- version: `0.17.0`
+- version: `0.18.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -36,7 +36,7 @@ PR 一覧:
  Bitbucket PRs — myworkspace/my-app   OPEN  MERGED  DECLINED  12件
 ──────────────────────────────────────────────────────────────────────
  #482   feat: 経路検索のキャッシュ層を追加      💬4   kayashima  2時間前
-        feature/route-cache → develop
+        feature/route-cache → develop                         R: ◉ ◉ +2
  #479   fix: null チェック漏れ                        tanaka     1日前
         fix/null-check → develop
 ──────────────────────────────────────────────────────────────────────
@@ -89,8 +89,9 @@ kitty_graphics = true
 ```
 
 設定後、Herdr を再起動するか `herdr server reload-config` を実行します。
-PR 一覧では選択中の PR、詳細ヘッダーでは PR 投稿者、Comments と内蔵 diff では
-画面内に表示中のルートコメント・返信の全ユーザーが対象です。画像APIや画像取得が
+PR 一覧では画面内に表示中の全PRについて投稿者と最大4人のレビューア、詳細ヘッダーでは
+PR 投稿者、Comments と内蔵 diff では画面内に表示中のルートコメント・返信の全ユーザーが
+対象です。レビューアが5人以上なら `+N` で省略数を表示します。画像APIや画像取得が
 利用できない場合は、自動的に従来の文字表示へ戻ります。
 
 Atlassian のプロフィール画像が「組織内のみ」公開の場合、Bitbucket REST API は
@@ -138,7 +139,8 @@ export JIRA_USERNAME="<Atlassianアカウントのメールアドレス>"
 export JIRA_API_TOKEN="<Jiraスコープを持つAPIトークン>"
 ```
 
-3変数がすべて設定されている場合だけ `GET /rest/api/3/user?accountId=...` を使用します。
+3変数がすべて設定されている場合だけ `GET /rest/api/3/user/bulk` を使用し、画面内で
+未解決のユーザーを最大10人ずつまとめて照会します。
 いずれかが未設定ならJira APIは呼び出しません。Bitbucket用の
 `ATLASSIAN_API_TOKEN`はJira認証には流用しません。
 
@@ -214,7 +216,7 @@ default_state = "OPEN"   # 一覧の初期フィルタ
 placement = "tab"        # tab | split | zoomed | overlay — ビューア自体の配置
 list_tab_title = "PRs {repo}"  # ビューアの herdr タブ名。{repo} {workspace} が使える
 show_comments = true     # diff 内インラインコメントの初期表示
-show_avatars = true      # 対応環境で投稿者・コメント投稿者のアバターを表示
+show_avatars = true      # 対応環境で投稿者・レビューア・コメント投稿者のアバターを表示
 context_fold = false     # true で内蔵ビューアの hunk を折り畳んだ状態で開く
 http_timeout_sec = 20
 
@@ -271,7 +273,9 @@ outdated_fg = "yellow"
   （ヘッダは「12/48件+」のようにヒット数／取得済み件数を表示）。
 - 起動時は前回取得した一覧を即表示し、裏で最新に更新します
   （キャッシュは plugin の state ディレクトリ配下 `cache/`）。
-- アバターは中央を正方形に切り出して state ディレクトリ配下へ保存し、Bitbucket/JiraのAPI画像は24時間再利用します。
+- アバターは中央を正方形に切り出して state ディレクトリ配下へ無期限で保存します。
+  Jira画像URLは30日ごとに一括で再確認し、URLが変わった場合だけ画像を再取得します。
+  可視範囲だけを遅延取得し、画像ダウンロードは最大4並列です。
   `avatar_overrides` の画像変更は更新時刻とサイズで検出します。上書き画像を読めない場合は
   Bitbucket API の画像へ戻り、API画像も取得できなければ名前だけを表示します。
 - Bitbucket API の diff は大きな PR で切り詰められます（1ファイル2000行/100KB、全体8000行、200ファイル）。

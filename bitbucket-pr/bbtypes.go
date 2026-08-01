@@ -49,8 +49,9 @@ type Participant struct {
 	Approved bool    `json:"approved"`
 }
 
-// PullRequest is a PR from the list or detail endpoint. The list payload
-// omits some fields (participants, reviewers); the detail fetch fills them.
+// PullRequest is a PR from the list or detail endpoint. The trimmed list
+// payload includes compact reviewer participants; the detail fetch fills the
+// description and the remaining fields.
 type PullRequest struct {
 	ID           int           `json:"id"`
 	Title        string        `json:"title"`

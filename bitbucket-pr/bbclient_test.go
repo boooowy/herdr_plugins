@@ -55,7 +55,9 @@ func TestListPRsPageReturnsNext(t *testing.T) {
 		switch r.URL.Query().Get("page") {
 		case "":
 			if f := r.URL.Query().Get("fields"); !strings.Contains(f, "values.title") ||
-				!strings.Contains(f, "values.author.links.avatar.href") {
+				!strings.Contains(f, "values.author.account_id") ||
+				!strings.Contains(f, "values.participants.user.account_id") ||
+				!strings.Contains(f, "values.participants.user.links.avatar.href") {
 				t.Errorf("first URL should trim the payload via fields=, got %q", f)
 			}
 			fmt.Fprintf(w, `{"values":[{"id":1},{"id":2}],"next":"%s/2.0/repositories/ws/repo/pullrequests?page=2"}`, srv.URL)

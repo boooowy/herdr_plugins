@@ -23,7 +23,7 @@ type Config struct {
 	Placement        string            `toml:"placement"`        // tab | split | zoomed | overlay
 	ListTabTitle     string            `toml:"list_tab_title"`   // viewer tab label: {repo} {workspace}
 	ShowComments     bool              `toml:"show_comments"`    // inline comments in the diff view
-	ShowAvatars      bool              `toml:"show_avatars"`     // author avatars via Herdr's graphics layer
+	ShowAvatars      bool              `toml:"show_avatars"`     // account avatars via Herdr's graphics layer
 	AvatarOverrides  map[string]string `toml:"avatar_overrides"` // Atlassian account_id -> local image
 	ContextFold      bool              `toml:"context_fold"`     // hunks start folded
 	HTTPTimeoutSec   int               `toml:"http_timeout_sec"`

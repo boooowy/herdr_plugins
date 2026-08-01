@@ -315,7 +315,10 @@ func (c *bbClient) repoURL(ws, repo, suffix string) string {
 // untrimmed objects carry descriptions and full participant lists.
 const listPRFields = "next," +
 	"values.id,values.title,values.comment_count,values.updated_on," +
-	"values.author.display_name,values.author.nickname,values.author.uuid,values.author.links.avatar.href," +
+	"values.author.display_name,values.author.nickname,values.author.uuid,values.author.account_id,values.author.links.avatar.href," +
+	"values.participants.role,values.participants.state,values.participants.approved," +
+	"values.participants.user.display_name,values.participants.user.nickname,values.participants.user.uuid," +
+	"values.participants.user.account_id,values.participants.user.links.avatar.href," +
 	"values.source.branch.name,values.destination.branch.name," +
 	"values.links.html.href"
 
