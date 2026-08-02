@@ -109,6 +109,25 @@ func TestDiffViewCommentLabelAndJumpPosition(t *testing.T) {
 	}
 }
 
+func TestDiffViewPendingOutlineLineOldSide(t *testing.T) {
+	a := &app{w: 100, h: 30, detail: map[int]*prDetail{}}
+	d := a.detailFor(8)
+	d.diffstat = []DiffStatEntry{{Status: "modified", Old: &struct {
+		Path string `json:"path"`
+	}{Path: "a.go"}, New: &struct {
+		Path string `json:"path"`
+	}{Path: "a.go"}}}
+	d.files = []FileDiff{*hunkFixtureFile()}
+	d.comments = []Comment{}
+	v := newDiffView(a, 8, 0)
+	v.pendingLine, v.pendingOldLine = 10, true
+	v.tryPendingJump(20)
+	line, ok := v.vp.Current().Item.(DiffLine)
+	if !ok || line.Kind != LineDel || line.OldNo != 10 || v.pendingLine != 0 {
+		t.Fatalf("old-side jump = row:%#v pending:%d", v.vp.Current(), v.pendingLine)
+	}
+}
+
 func TestSelectionAndInterceptEsc(t *testing.T) {
 	v := &diffView{selAnchor: -1}
 	v.vp.Rows = []Row{

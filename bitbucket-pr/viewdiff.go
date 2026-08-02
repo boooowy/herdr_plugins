@@ -46,6 +46,10 @@ type diffView struct {
 	// pendingJump is a comment root ID to scroll to once its row exists
 	// (set when the Comments tab jumps into the diff); 0 = none.
 	pendingJump int
+	// pendingLine is an Outline symbol line to select after opening the diff.
+	// pendingOldLine chooses the deleted/old gutter for removed symbols.
+	pendingLine    int
+	pendingOldLine bool
 }
 
 func newDiffView(a *app, prID, fileIdx int) *diffView {
@@ -288,6 +292,28 @@ func hunkCommentCount(anchored map[[2]int][]CommentThread, hi int) int {
 // a real viewport height (Paint sets vp.H), so render passes the frame's
 // height explicitly before painting.
 func (v *diffView) tryPendingJump(h int) {
+	if v.pendingLine > 0 {
+		for i, row := range v.vp.Rows {
+			line, ok := row.Item.(DiffLine)
+			if !ok || row.Kind != RowDiffLine {
+				continue
+			}
+			n := line.NewNo
+			if v.pendingOldLine {
+				n = line.OldNo
+			}
+			if n == v.pendingLine {
+				v.vp.Cursor = i
+				if h > 0 {
+					v.vp.H = h
+					v.vp.Top = max(i-3, 0)
+					v.vp.clampTop()
+					v.pendingLine = 0
+				}
+				return
+			}
+		}
+	}
 	if v.pendingJump == 0 {
 		return
 	}
