@@ -162,7 +162,7 @@ func TestMasterThreadRow(t *testing.T) {
 	th := CommentThread{Root: mkComment(1, 0, "a.go", nil, &to, false, time.Now())}
 	th.Root.User.DisplayName = "tanaka"
 	th.Root.Content.Raw = "最初の行\n二行目"
-	r := masterThreadRow(th, 40)
+	r := masterThreadRow(th, 40, false)
 	if !r.Selectable || r.Kind != RowComment || r.Item.(int) != 1 {
 		t.Errorf("row = %+v", r)
 	}
@@ -178,7 +178,7 @@ func TestMasterThreadRow(t *testing.T) {
 		t.Errorf("excerpt must be the first line only: %q", text)
 	}
 	// Too narrow for an excerpt: the frame alone doesn't fit.
-	if txt := spansText(masterThreadRow(th, 14)); strings.Contains(txt, "「") {
+	if txt := spansText(masterThreadRow(th, 14, false)); strings.Contains(txt, "「") {
 		t.Errorf("narrow row still has excerpt: %q", txt)
 	}
 }
@@ -191,20 +191,65 @@ func spansText(r Row) string {
 	return s
 }
 
+func TestOverviewReviewersAreVerticalOrderedAndDecorated(t *testing.T) {
+	a := &app{w: 100, h: 30, avatars: &avatarGraphics{}}
+	pr := &PullRequest{}
+	makeParticipant := func(name, state string, approved bool, avatar bool) Participant {
+		p := Participant{Role: "REVIEWER", State: state, Approved: approved}
+		p.User.DisplayName = name
+		p.User.AccountID = name
+		if avatar {
+			setAvatarURL(&p.User, "https://example.test/"+name+".png")
+		}
+		return p
+	}
+	pr.Participants = []Participant{
+		makeParticipant("Pending User", "", false, false),
+		makeParticipant("Approved User", "approved", true, true),
+		makeParticipant("Changes User", "changes_requested", false, true),
+	}
+	rows := (&detailView{}).overviewRows(a, &prDetail{pr: pr})
+	var reviewerRows []Row
+	for _, r := range rows {
+		text := spansText(r)
+		if strings.Contains(text, "Approved") || strings.Contains(text, "Changes requested") || strings.Contains(text, "Pending") {
+			reviewerRows = append(reviewerRows, r)
+		}
+	}
+	if len(reviewerRows) != 3 {
+		t.Fatalf("reviewer rows = %d: %+v", len(reviewerRows), reviewerRows)
+	}
+	want := []string{"Approved User", "Changes User", "Pending User"}
+	for i, name := range want {
+		if text := spansText(reviewerRows[i]); !strings.Contains(text, name) {
+			t.Errorf("row %d = %q, want %q", i, text, name)
+		}
+	}
+	if len(reviewerRows[0].Avatars) != 1 || reviewerRows[0].Avatars[0].Badge != AvatarBadgeApproved {
+		t.Errorf("approved avatars = %+v", reviewerRows[0].Avatars)
+	}
+	if len(reviewerRows[1].Avatars) != 1 || reviewerRows[1].Avatars[0].Badge != AvatarBadgeNone {
+		t.Errorf("changes avatars = %+v", reviewerRows[1].Avatars)
+	}
+	if len(reviewerRows[2].Avatars) != 0 || !strings.Contains(spansText(reviewerRows[2]), "○ Pending") {
+		t.Errorf("pending row = %q avatars=%+v", spansText(reviewerRows[2]), reviewerRows[2].Avatars)
+	}
+}
+
 func TestMasterReplyRowIndentByDepth(t *testing.T) {
 	r := Reply{Comment: mkComment(9, 2, "", nil, nil, false, time.Now()), Depth: 1}
 	r.User.DisplayName = "suzuki"
 	r.Content.Raw = "対応します"
-	d1 := spansText(masterReplyRow(r, 50))
+	d1 := spansText(masterReplyRow(r, 50, false))
 	r.Depth = 2
-	d2 := spansText(masterReplyRow(r, 50))
+	d2 := spansText(masterReplyRow(r, 50, false))
 	if !strings.HasPrefix(d1, "     ↳ ") || !strings.HasPrefix(d2, "       ↳ ") {
 		t.Errorf("indents: depth1=%q depth2=%q", d1, d2)
 	}
 	if !strings.Contains(d1, "suzuki") || !strings.Contains(d1, "「対応します」") {
 		t.Errorf("reply row = %q", d1)
 	}
-	row := masterReplyRow(r, 50)
+	row := masterReplyRow(r, 50, false)
 	if !row.Selectable || row.Kind != RowComment || row.Item.(int) != 9 {
 		t.Errorf("reply row meta = %+v", row)
 	}
@@ -214,11 +259,11 @@ func TestMasterThreadRowResolvedBadge(t *testing.T) {
 	to := 15
 	th := CommentThread{Root: mkComment(1, 0, "a.go", nil, &to, false, time.Now())}
 	th.Root.Resolution = &CommentResolution{}
-	if txt := spansText(masterThreadRow(th, 50)); !strings.Contains(txt, "✓") {
+	if txt := spansText(masterThreadRow(th, 50, false)); !strings.Contains(txt, "✓") {
 		t.Errorf("resolved row = %q", txt)
 	}
 	th.Root.Resolution = nil
-	if txt := spansText(masterThreadRow(th, 50)); strings.Contains(txt, "✓") {
+	if txt := spansText(masterThreadRow(th, 50, false)); strings.Contains(txt, "✓") {
 		t.Errorf("unresolved row = %q", txt)
 	}
 }

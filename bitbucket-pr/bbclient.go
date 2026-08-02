@@ -12,6 +12,7 @@ import (
 )
 
 const bbAPIBase = "https://api.bitbucket.org/2.0"
+const maxAvatarBytes = 2 << 20
 
 // bbClient is a minimal Bitbucket Cloud API 2.0 client: Basic auth with an
 // Atlassian email + API token (App Passwords died 2026-06), `next`-link
@@ -221,6 +222,71 @@ func (c *bbClient) getText(rawURL string) (string, error) {
 	return string(data), nil
 }
 
+// avatar fetches a Bitbucket-provided account image. Credentials are added
+// only when the image URL has the same origin as the configured API base;
+// avatar links often redirect to a public Atlassian CDN and must never carry
+// the Bitbucket API token there.
+func (c *bbClient) avatar(rawURL string) ([]byte, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("invalid avatar URL %q", rawURL)
+	}
+	base, err := url.Parse(c.base)
+	if err != nil {
+		return nil, fmt.Errorf("invalid API base: %w", err)
+	}
+	if u.Scheme != "https" && !(u.Scheme == "http" && sameOrigin(u, base)) {
+		return nil, fmt.Errorf("refusing non-HTTPS avatar URL %q", rawURL)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if sameOrigin(u, base) {
+		req.SetBasicAuth(c.email, c.token)
+	}
+	req.Header.Set("Accept", "image/png,image/jpeg,image/gif,image/webp")
+
+	// Clone the client so redirect handling can explicitly strip credentials
+	// across origins without changing the behavior of ordinary API requests.
+	hc := *c.http
+	previousCheck := hc.CheckRedirect
+	hc.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if next.URL.Scheme != "https" && base.Scheme != "http" {
+			return fmt.Errorf("refusing avatar redirect to non-HTTPS URL %q", next.URL)
+		}
+		if len(via) > 0 && !sameOrigin(next.URL, via[0].URL) {
+			next.Header.Del("Authorization")
+		}
+		if previousCheck != nil {
+			return previousCheck(next, via)
+		}
+		return nil
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, &httpError{Status: resp.StatusCode, URL: rawURL, Body: strings.TrimSpace(string(body))}
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAvatarBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxAvatarBytes {
+		return nil, fmt.Errorf("avatar exceeds %d bytes", maxAvatarBytes)
+	}
+	return data, nil
+}
+
+func sameOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+}
+
 // getAll follows the collection's `next` links verbatim and returns every
 // value. maxPages caps runaway collections (0 = default 50).
 func getAll[T any](c *bbClient, firstURL string, maxPages int) ([]T, error) {
@@ -249,7 +315,11 @@ func (c *bbClient) repoURL(ws, repo, suffix string) string {
 // untrimmed objects carry descriptions and full participant lists.
 const listPRFields = "next," +
 	"values.id,values.title,values.comment_count,values.updated_on," +
-	"values.author,values.source.branch.name,values.destination.branch.name," +
+	"values.author.display_name,values.author.nickname,values.author.uuid,values.author.account_id,values.author.links.avatar.href," +
+	"values.participants.role,values.participants.state,values.participants.approved," +
+	"values.participants.user.display_name,values.participants.user.nickname,values.participants.user.uuid," +
+	"values.participants.user.account_id,values.participants.user.links.avatar.href," +
+	"values.source.branch.name,values.destination.branch.name," +
 	"values.links.html.href"
 
 // listPRsFirstURL builds the first page of the repo's PR list filtered by

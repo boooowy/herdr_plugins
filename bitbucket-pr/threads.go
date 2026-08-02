@@ -11,11 +11,11 @@ import (
 // blank row separates threads. The root header row is selectable so the
 // cursor can walk threads. anchorLabel ("L486–496" etc.) prefixes the
 // header when non-empty.
-func threadRows(t CommentThread, width int, now time.Time, anchorLabel string) []Row {
+func threadRows(t CommentThread, width int, now time.Time, anchorLabel string, showAvatars bool) []Row {
 	var rows []Row
-	bg := func(spans []Span, kind RowKind, item any, selectable bool) {
+	bg := func(spans []Span, avatars []RowAvatar, kind RowKind, item any, selectable bool) {
 		rows = append(rows, Row{Kind: kind, Item: item, Selectable: selectable,
-			Spans: padBgRow(spans, width)})
+			Spans: padBgRow(spans, width), Avatars: avatars})
 	}
 
 	// Root header: 💬 author (time) [anchor] [outdated]
@@ -23,22 +23,21 @@ func threadRows(t CommentThread, width int, now time.Time, anchorLabel string) [
 	if anchorLabel != "" {
 		header = append(header, Span{anchorLabel + " ", onCmtBg(styleMeta)})
 	}
-	header = append(header,
-		Span{"💬 ", onCmtBg(styleNone)},
-		Span{t.Root.User.Name(), onCmtBg(styleAuthor)},
-		Span{" (" + relTime(t.Root.CreatedOn, now) + ")", onCmtBg(styleDim)},
-	)
+	header = append(header, Span{"💬 ", onCmtBg(styleNone)})
+	header, avatars := appendAccountName(header, t.Root.User, t.Root.User.Name(),
+		onCmtBg(styleAuthor), onCmtBg(styleNone), showAvatars)
+	header = append(header, Span{" (" + relTime(t.Root.CreatedOn, now) + ")", onCmtBg(styleDim)})
 	if t.Root.Inline != nil && t.Root.Inline.Outdated {
 		header = append(header, Span{" [outdated]", onCmtBg(styleOutdated)})
 	}
 	if t.Root.Resolved() {
 		header = append(header, Span{" [resolved]", onCmtBg(styleApproved)})
 	}
-	bg(header, RowComment, t.Root.ID, true)
+	bg(header, avatars, RowComment, t.Root.ID, true)
 
 	appendBody := func(c Comment, indent string) {
 		if c.Deleted {
-			bg([]Span{{indent + "(deleted comment)", onCmtBg(styleDim)}}, RowComment, nil, false)
+			bg([]Span{{indent + "(deleted comment)", onCmtBg(styleDim)}}, nil, RowComment, nil, false)
 			return
 		}
 		w := width - displayWidth(indent) - 1
@@ -47,7 +46,7 @@ func threadRows(t CommentThread, width int, now time.Time, anchorLabel string) [
 			for _, sp := range spans {
 				row = append(row, Span{sp.Text, onCmtBg(sp.Style)})
 			}
-			bg(row, RowComment, nil, false)
+			bg(row, nil, RowComment, nil, false)
 		}
 	}
 	appendBody(t.Root, "   ")
@@ -55,12 +54,11 @@ func threadRows(t CommentThread, width int, now time.Time, anchorLabel string) [
 	for _, r := range t.Replies {
 		// Nesting: each depth level shifts the ↳ two cells right.
 		indent := "   " + strings.Repeat("  ", r.Depth-1)
-		head := []Span{
-			{indent + "↳ ", onCmtBg(styleDim)},
-			{r.User.Name(), onCmtBg(styleAuthor)},
-			{" (" + relTime(r.CreatedOn, now) + ")", onCmtBg(styleDim)},
-		}
-		bg(head, RowComment, nil, false)
+		head := []Span{{indent + "↳ ", onCmtBg(styleDim)}}
+		head, avatars := appendAccountName(head, r.User, r.User.Name(),
+			onCmtBg(styleAuthor), onCmtBg(styleNone), showAvatars)
+		head = append(head, Span{" (" + relTime(r.CreatedOn, now) + ")", onCmtBg(styleDim)})
+		bg(head, avatars, RowComment, nil, false)
 		appendBody(r.Comment, indent+"  ")
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -16,14 +17,16 @@ type Config struct {
 	Email    string `toml:"email"`
 	APIToken string `toml:"api_token"`
 
-	DefaultWorkspace string `toml:"default_workspace"` // fallback: $BITBUCKET_WORKSPACE
-	DefaultRepo      string `toml:"default_repo"`
-	DefaultState     string `toml:"default_state"`  // initial PR list filter
-	Placement        string `toml:"placement"`      // tab | split | zoomed | overlay
-	ListTabTitle     string `toml:"list_tab_title"` // viewer tab label: {repo} {workspace}
-	ShowComments     bool   `toml:"show_comments"`  // inline comments in the diff view
-	ContextFold      bool   `toml:"context_fold"`   // hunks start folded
-	HTTPTimeoutSec   int    `toml:"http_timeout_sec"`
+	DefaultWorkspace string            `toml:"default_workspace"` // fallback: $BITBUCKET_WORKSPACE
+	DefaultRepo      string            `toml:"default_repo"`
+	DefaultState     string            `toml:"default_state"`    // initial PR list filter
+	Placement        string            `toml:"placement"`        // tab | split | zoomed | overlay
+	ListTabTitle     string            `toml:"list_tab_title"`   // viewer tab label: {repo} {workspace}
+	ShowComments     bool              `toml:"show_comments"`    // inline comments in the diff view
+	ShowAvatars      bool              `toml:"show_avatars"`     // account avatars via Herdr's graphics layer
+	AvatarOverrides  map[string]string `toml:"avatar_overrides"` // Atlassian account_id -> local image
+	ContextFold      bool              `toml:"context_fold"`     // hunks start folded
+	HTTPTimeoutSec   int               `toml:"http_timeout_sec"`
 
 	// External diff tool (Enter on a file / D key). {patch} in the argv is
 	// replaced with the patch file path; without the placeholder the patch
@@ -59,6 +62,7 @@ func defaultConfig() Config {
 		Placement:         "tab",
 		ListTabTitle:      "PRs {repo}",
 		ShowComments:      true,
+		ShowAvatars:       true,
 		ContextFold:       false,
 		HTTPTimeoutSec:    20,
 		DiffTool:          []string{"hunk", "patch", "{patch}", "--agent-context", "{ctx}", "--agent-notes"},
@@ -97,6 +101,7 @@ func loadConfig() Config {
 		bad.loadErr = "config.toml: " + err.Error()
 		return bad
 	}
+	cfg.AvatarOverrides = normalizeAvatarOverridePaths(cfg.AvatarOverrides, dir)
 	switch cfg.Placement {
 	case "tab", "split", "zoomed", "overlay":
 	default:
@@ -143,6 +148,31 @@ func loadConfig() Config {
 		cfg.FocusBg = defaultConfig().FocusBg
 	}
 	return cfg
+}
+
+// normalizeAvatarOverridePaths turns config-relative paths into stable
+// absolute paths. Empty account IDs and paths are ignored so a typo cannot
+// suppress the Bitbucket-provided fallback image.
+func normalizeAvatarOverridePaths(overrides map[string]string, configDir string) map[string]string {
+	if len(overrides) == 0 {
+		return nil
+	}
+	normalized := make(map[string]string, len(overrides))
+	for accountID, path := range overrides {
+		accountID = strings.TrimSpace(accountID)
+		path = strings.TrimSpace(path)
+		if accountID == "" || path == "" {
+			continue
+		}
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(configDir, path)
+		}
+		normalized[accountID] = filepath.Clean(path)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 // credentials resolves the Bitbucket auth pair: config wins, then the

@@ -31,11 +31,12 @@ type prDetail struct {
 // mutation happens on the main loop goroutine: async fetches send apply
 // closures over resultCh.
 type app struct {
-	ctx    uiContext
-	cfg    Config
-	client *bbClient
-	herdr  *herdrClient
-	sgr    map[StyleID]string
+	ctx     uiContext
+	cfg     Config
+	client  *bbClient
+	herdr   *herdrClient
+	avatars *avatarGraphics
+	sgr     map[StyleID]string
 
 	w, h     int
 	stack    []view
@@ -86,6 +87,15 @@ func (a *app) pop() {
 }
 
 func (a *app) top() view { return a.stack[len(a.stack)-1] }
+
+func (a *app) avatarsEnabled() bool { return a.avatars != nil }
+
+func (a *app) avatarReady() <-chan struct{} {
+	if a.avatars == nil {
+		return nil
+	}
+	return a.avatars.ready()
+}
 
 // fetch runs work off the main loop and applies its result back on it. The
 // work function returns an apply closure so all state mutation stays on the
@@ -157,6 +167,8 @@ func runUI() {
 	}
 	if credsOK {
 		a.client = newBBClient(email, token, time.Duration(cfg.HTTPTimeoutSec)*time.Second)
+		timeout := time.Duration(cfg.HTTPTimeoutSec) * time.Second
+		a.avatars = newAvatarGraphics(herdr, a.client, newJiraClientFromEnv(timeout), cfg.ShowAvatars, cfg.AvatarOverrides)
 		a.push(newListView(a))
 		if ctx.PRID > 0 {
 			// Ctrl-clicked PR URL: go straight to the PR, list stays underneath.
@@ -180,6 +192,9 @@ func runUI() {
 		fmt.Fprint(out, "\x1b[?25h\x1b[?1049l")
 		out.Flush()
 	}()
+	if a.avatars != nil {
+		defer a.avatars.close()
+	}
 
 	if !credsOK {
 		showAuthHelp(out, cfg, w, h)
@@ -215,6 +230,9 @@ func runUI() {
 		paintFooter(a, frame)
 		frame.Flush(out, a.sgr)
 		out.Flush()
+		if a.avatars != nil {
+			a.avatars.submit(frame.Avatars())
+		}
 
 		select {
 		case <-winch:
@@ -228,6 +246,9 @@ func runUI() {
 			}
 		case apply := <-a.resultCh:
 			apply(a)
+		case <-a.avatarReady():
+			// A downloaded or disk-cached avatar is ready. The next loop
+			// rebuilds only the graphics scene; terminal rows are unchanged.
 		case k, ok := <-keyCh:
 			if !ok {
 				return

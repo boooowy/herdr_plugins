@@ -155,7 +155,7 @@ func (v *diffView) rebuild(a *app) {
 	addThread := func(t CommentThread) {
 		v.threadFor[t.Root.ID] = t
 		start := len(rows)
-		rows = append(rows, threadRows(t, a.w, now, t.lineLabel())...)
+		rows = append(rows, threadRows(t, a.w, now, t.lineLabel(), a.avatarsEnabled())...)
 		v.threadSpan[t.Root.ID] = [2]int{start, len(rows) - 1}
 	}
 

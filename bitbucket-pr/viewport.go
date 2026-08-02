@@ -23,12 +23,27 @@ type Span struct {
 	Style StyleID
 }
 
+// RowAvatar places one account image relative to the beginning of a row.
+// The row text reserves Cols cells at Col so the graphics layer never covers
+// useful text. SelectedOnly is available to views that intentionally limit an
+// image to the cursor row.
+type RowAvatar struct {
+	URL          string
+	AccountID    string
+	Col          int
+	Cols         int
+	Rows         int
+	Badge        AvatarBadge
+	SelectedOnly bool
+}
+
 // Row is one rendered line plus its semantic identity.
 type Row struct {
 	Kind       RowKind
 	Spans      []Span
 	Item       any
 	Selectable bool
+	Avatars    []RowAvatar
 }
 
 // row is a convenience constructor.
@@ -185,6 +200,17 @@ func (v *Viewport) Paint(s *Screen, r Rect) {
 		x := r.X
 		for _, sp := range v.Rows[idx].Spans {
 			x = s.WriteString(x, r.Y+i, sp.Text, sp.Style, r.X+r.W)
+		}
+		for _, avatar := range v.Rows[idx].Avatars {
+			if avatar.SelectedOnly && idx != v.Cursor {
+				continue
+			}
+			ax := r.X + avatar.Col
+			ay := r.Y + i
+			if ax < r.X || ay < r.Y || ax+avatar.Cols > r.X+r.W || ay+avatar.Rows > r.Y+r.H {
+				continue
+			}
+			s.AddAvatar(ax, ay, avatar.Cols, avatar.Rows, avatar.URL, avatar.AccountID, avatar.Badge)
 		}
 		if idx == v.Cursor {
 			s.StyleRow(r.Y+i, r.X, r.X+r.W, styleNone, styleCursor)

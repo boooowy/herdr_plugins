@@ -9,7 +9,7 @@ import (
 func TestLoadConfigDefaultsWhenMissing(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", t.TempDir())
 	cfg := loadConfig()
-	if cfg.Placement != "tab" || cfg.DefaultState != "OPEN" || !cfg.ShowComments {
+	if cfg.Placement != "tab" || cfg.DefaultState != "OPEN" || !cfg.ShowComments || !cfg.ShowAvatars {
 		t.Errorf("unexpected defaults: %+v", cfg)
 	}
 	if cfg.loadErr != "" {
@@ -27,7 +27,7 @@ func TestLoadConfigBadValuesFallBack(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", dir)
 	os.WriteFile(filepath.Join(dir, "config.toml"), []byte(
-		"placement = \"floating\"\ndefault_state = \"open\"\nhttp_timeout_sec = -1\nshow_comments = false\ndifftool_placement = \"floating\"\n"), 0o644)
+		"placement = \"floating\"\ndefault_state = \"open\"\nhttp_timeout_sec = -1\nshow_comments = false\nshow_avatars = false\ndifftool_placement = \"floating\"\n"), 0o644)
 	cfg := loadConfig()
 	if cfg.Placement != "tab" {
 		t.Errorf("invalid placement should fall back to tab, got %q", cfg.Placement)
@@ -41,8 +41,35 @@ func TestLoadConfigBadValuesFallBack(t *testing.T) {
 	if cfg.ShowComments {
 		t.Error("show_comments=false must stick")
 	}
+	if cfg.ShowAvatars {
+		t.Error("show_avatars=false must stick")
+	}
 	if cfg.DifftoolPlacement != "popup" {
 		t.Errorf("invalid difftool_placement should fall back to popup, got %q", cfg.DifftoolPlacement)
+	}
+}
+
+func TestLoadConfigNormalizesAvatarOverridePaths(t *testing.T) {
+	dir := t.TempDir()
+	absolute := filepath.Join(t.TempDir(), "absolute.png")
+	t.Setenv("HERDR_PLUGIN_CONFIG_DIR", dir)
+	data := "[avatar_overrides]\n" +
+		"\"account-relative\" = \"avatars/fukaya.png\"\n" +
+		"\"account-absolute\" = \"" + absolute + "\"\n" +
+		"\"account-empty\" = \"  \"\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadConfig()
+	if got := cfg.AvatarOverrides["account-relative"]; got != filepath.Join(dir, "avatars", "fukaya.png") {
+		t.Errorf("relative override = %q", got)
+	}
+	if got := cfg.AvatarOverrides["account-absolute"]; got != absolute {
+		t.Errorf("absolute override = %q", got)
+	}
+	if _, ok := cfg.AvatarOverrides["account-empty"]; ok {
+		t.Error("empty override must be ignored")
 	}
 }
 

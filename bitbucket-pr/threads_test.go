@@ -18,7 +18,7 @@ func TestThreadRowsBackgroundLayout(t *testing.T) {
 	thread.Root.User.DisplayName = "author"
 	thread.Replies[0].User.DisplayName = "replier"
 
-	rows := threadRows(thread, 60, base.Add(2*time.Hour), "L15")
+	rows := threadRows(thread, 60, base.Add(2*time.Hour), "L15", false)
 
 	// Header: selectable, carries the root ID, painted on the comment bg.
 	head := rows[0]
