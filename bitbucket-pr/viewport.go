@@ -8,13 +8,16 @@ package main
 type RowKind int
 
 const (
-	RowText     RowKind = iota // plain content (description, separators)
-	RowPR                      // one PR in the list (Item: int index)
-	RowFile                    // one file in the diffstat (Item: int index)
-	RowHunk                    // a hunk header (Item: hunkRef)
-	RowDiffLine                // one diff line (Item: hunkRef)
-	RowComment                 // a comment block line (Item: comment id)
-	RowTab                     // the detail tab bar
+	RowText          RowKind = iota // plain content (description, separators)
+	RowPR                           // one PR in the list (Item: int index)
+	RowFile                         // one file in the diffstat (Item: int index)
+	RowHunk                         // a hunk header (Item: hunkRef)
+	RowDiffLine                     // one diff line (Item: hunkRef)
+	RowComment                      // a comment block line (Item: comment id)
+	RowTab                          // the detail tab bar
+	RowOutlineDir                   // Outline directory (Item: outlineRowRef)
+	RowOutlineFile                  // Outline file/test group (Item: outlineRowRef)
+	RowOutlineSymbol                // Outline symbol (Item: outlineRowRef)
 )
 
 // Span is one styled segment of a row, painted left to right.

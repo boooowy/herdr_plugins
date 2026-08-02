@@ -25,6 +25,11 @@ type prDetail struct {
 	comments []Comment
 	diffText string
 	files    []FileDiff
+
+	outlineStarted bool
+	outlineLoading bool
+	outline        *outlineResult
+	outlineErr     string
 }
 
 // app owns the terminal, the view stack, and all fetched data. Every

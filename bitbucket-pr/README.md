@@ -1,12 +1,12 @@
 # bitbucket-pr — Bitbucket PR Viewer
 
 Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧・コメントするビューアです。
-PR 一覧 → 詳細（説明・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）
+PR 一覧 → 詳細（説明・変更シンボル・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）
 の閲覧に加え、`c` キーでコード行へのインラインコメント・返信・PRコメントを投稿できます
 （本文はいつものエディタが popup で開きます）。approve / merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
-- version: `0.19.0`
+- version: `0.20.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -43,6 +43,33 @@ PR 一覧:
  j/k:移動  Enter:開く  Tab/s:state切替  /:絞り込み  y:URL  b:ブランチ  r:再読込  q:終了
 ```
 
+Review Outline（詳細の `2:Outline`）:
+
+```text
+ #482 feat: route cache                         OPEN
+ feature/route-cache → develop (a1b2c3d4)  by kayashima
+ 1:Overview   2:Outline   3:Files (8)   4:Comments (4)
+──────────────────────────────────────────────────────────────────────────────
+ 5 changed symbols (tests:2) in 3/3 files  │ method NewRouteCache  signature_changed
+ ! v internal/cache  chg:3 api:2 fan-in:8  │ ! contract change + fan-in:5
+     v route_cache.go  chg:2 api:1          │
+       ~ function NewRouteCache api fan-in:5│ Signature
+         function loadEntry                 │ - func NewRouteCache(r *redis.Client)
+       > 2 tests                            │ + func NewRouteCache(r *redis.Client, ttl time.Duration)
+   v cmd  chg:2 api:1                       │
+                                           │ Used by
+                                           │ * function main  cmd/server/main.go:42
+                                           │
+                                           │ Related diff
+──────────────────────────────────────────────────────────────────────────────
+ Tab/h/l:タブ  j/k:移動  Enter:開く/diff  gd/gr:呼出先/元  O:並び順
+```
+
+Outline は Tree-sitter で変更シンボルと1-hopの caller/callee を抽出し、シグネチャ変更、
+高 fan-in、大きなファイルを先に確認しやすくする**注意マップ**です。解析結果はコードの正しさや
+影響範囲の完全性を保証するものではありません。テストシンボルはファイルごとに初期状態で折り畳み、
+広い画面では右側にシグネチャ・参照元/先・関連 hunk を表示します。
+
 diff ビュー（hunk 単位・インラインコメント埋め込み）:
 
 ```text
@@ -69,6 +96,8 @@ PR 更新後に位置がずれたコメント（outdated）は捨てずに、各
 - Herdr 0.7.0 以上
 - macOS または Linux
 - Go 1.26.4 以上（インストール時の plugin build に使用）
+- C コンパイラ（Tree-sitter grammar のビルドに使用。macOS は Xcode Command Line Tools、
+  Linux は clang または gcc）
 - Bitbucket Cloud の API トークン（後述）
 - （任意）[hunk](https://github.com/modem-dev/hunk) — デフォルトの外部 diff ビューア。
   `brew install hunk` または `npm i -g hunkdiff`。**config.toml を作らなくても
@@ -174,18 +203,43 @@ description = "Bitbucket PR: open viewer for current repo"
 herdr plugin action invoke open --plugin boooowy.bitbucket-pr
 ```
 
+### Review Outline の利用条件とキャッシュ
+
+Outline は Bitbucket API のdiffだけでなく、起動元のローカルGitリポジトリにあるPRの
+source/destination commitを直接解析します。対象リポジトリ内のペインからプラグインを開き、
+両commitがローカルに存在する状態で利用してください。URLクリック時は、フォーカス中ペインの
+checkoutがURLのリポジトリと一致する場合だけ関連付けます。
+
+commitが無い場合、プラグインはcloneやfetchを自動実行しません。表示されたリポジトリで
+PRブランチをfetchしてから `r` で再読込してください。Outlineだけが利用不可になり、Overview、
+Files、Commentsは通常どおり利用できます。
+
+解析はOutlineを初めて開いた時だけ非同期で実行します。結果はsource/destination commitの組を
+キーに Herdr が渡す `HERDR_PLUGIN_STATE_DIR` 配下の `cache/` へ保存するため、同じPRを
+再表示しても毎回解析しません。`r` は画面上の結果を破棄して再読込しますが、commitが同じなら
+永続キャッシュを再利用します。
+
+対応言語は Go、Rust、Python、TypeScript/TSX、JavaScript/JSX、Java、Bash です。Bashは
+`.sh`、`.bash`と、`#!/bin/bash`または`#!/usr/bin/env bash`で始まる拡張子なしファイルを
+解析します。関数呼び出しは名前を静的に確定できるものだけを関連付け、変数経由の実行、
+`eval`、動的な`source`は対象外です。未対応言語、生成物、バイナリはスキップ理由を表示し、
+Filesタブで引き続き確認できます。
+
 ## キーバインド（ビューア内。`?` でその画面で使えるキーを表示）
 
 | キー                                                   | 動作                                                                                                                                                                                                                                                                                                 |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `j` / `k` / `↑` / `↓`                                  | 移動                                                                                                                                                                                                                                                                                                 |
-| `Ctrl-d` / `Ctrl-u`, `Ctrl-f` / `Ctrl-b`               | スクロール（Comments タブでは `Ctrl-d`/`Ctrl-u` が右プレビューのスクロール）                                                                                                                                                                                                                         |
-| `g` / `G`                                              | 先頭 / 末尾                                                                                                                                                                                                                                                                                          |
-| `Enter`                                                | 開く（一覧→詳細→**diff ツール**、Comments のスレッド／ファイル→**コードへジャンプ**）/ 内蔵ビューアでは hunk 折畳トグル                                                                                                                                                                              |
+| `Ctrl-d` / `Ctrl-u`, `Ctrl-f` / `Ctrl-b`               | スクロール（Outline / Comments タブでは `Ctrl-d`/`Ctrl-u` が右プレビューのスクロール）                                                                                                                                                                                                              |
+| `g` / `G`                                              | 先頭 / 末尾（Outlineでは `gg` が先頭）                                                                                                                                                                                                                                                               |
+| `Enter`                                                | 開く（一覧→詳細、Outlineのディレクトリ/ファイル/テスト→展開、Outlineのシンボル→**関連diff**、Files→**diffツール**、Comments→**コードへジャンプ**）/ 内蔵ビューアでは hunk 折畳トグル                                                                                                                    |
 | `v`                                                    | Files タブ: 内蔵 diff ビューアで開く / 内蔵ビューア内: **行選択の開始・解除**（`j`/`k` で範囲を伸ばし `c` で複数行コメント。`Esc` でも解除）                                                                                                                                                         |
-| `Tab` / `Shift-Tab` / `1`-`3` / `l` / `h`（`→` / `←`） | 詳細タブ切替（Overview / Files / Comments）                                                                                                                                                                                                                                                          |
+| `Tab` / `Shift-Tab` / `1`-`4` / `l` / `h`（`→` / `←`） | 詳細タブ切替（Overview / Outline / Files / Comments）                                                                                                                                                                                                                                                |
 | `s` / `Tab` / `l` / `h`（`→` / `←`）                   | state フィルタ切替（OPEN / MERGED / DECLINED / SUPERSEDED）（一覧）                                                                                                                                                                                                                                  |
-| `/`                                                    | **絞り込み** — 一覧: 番号・タイトル・著者・ブランチ名 / Files タブ: ファイルパス / Comments タブ: コメント本文・著者・ファイルパス・行番号（**インラインコメントも対象**、ヒットしたスレッドは返信ごと残る）。入力しながら即座に絞り込み、`Enter` で確定、`Esc`（または `q`）で解除、もう一度で戻る。空白区切りは AND 検索      |
+| `/`                                                    | **絞り込み** — 一覧: 番号・タイトル・著者・ブランチ名 / Outline: シンボル・kind・シグネチャ・ファイルパス / Files: ファイルパス / Comments: コメント本文・著者・ファイルパス・行番号。入力しながら即座に絞り込み、`Enter` で確定、`Esc`（または `q`）で解除。空白区切りは AND 検索                     |
+| `gd` / `gr`                                            | Outline: 選択シンボルの変更済み callee / caller へ移動。候補が複数なら選択画面を開き、PR外参照は場所をステータス表示                                                                                                                                                                                   |
+| `Ctrl-o` / `Ctrl-i`                                    | Outline: シンボル移動履歴を戻る / 進む                                                                                                                                                                                                                                                               |
+| `O`                                                    | Outline: ディレクトリの依存順 / アルファベット順を切替                                                                                                                                                                                                                                              |
 | `]h` / `[h`                                            | 次 / 前の hunk（内蔵ビューア）                                                                                                                                                                                                                                                                       |
 | `]f` / `[f`（`→` / `←`）                               | 次 / 前のファイル（内蔵ビューア）                                                                                                                                                                                                                                                                    |
 | `za` / `zA`                                            | hunk 折畳 / 全折畳（内蔵ビューア）                                                                                                                                                                                                                                                                   |

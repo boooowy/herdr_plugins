@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseBitbucketRemote(t *testing.T) {
 	cases := []struct {
@@ -37,5 +42,27 @@ func TestParseBitbucketRemote(t *testing.T) {
 		if ws != c.ws || repo != c.repo {
 			t.Errorf("parseBitbucketRemote(%q) = %q/%q, want %q/%q", c.url, ws, repo, c.ws, c.repo)
 		}
+	}
+}
+
+func TestRepoRootFromDir(t *testing.T) {
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	nested := filepath.Join(dir, "a", "b")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repoRootFromDir(nested)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.Abs(dir)
+	if canonical, evalErr := filepath.EvalSymlinks(want); evalErr == nil {
+		want = canonical
+	}
+	if got != want {
+		t.Fatalf("repo root = %q, want %q", got, want)
 	}
 }

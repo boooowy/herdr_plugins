@@ -9,14 +9,15 @@ import (
 
 const (
 	tabOverview = iota
+	tabOutline
 	tabFiles
 	tabComments
 	tabCount
 )
 
-// detailView shows one PR with three tabs: Overview / Files / Comments
-// (atlas.nvim's five tabs collapsed — Conversation/Review duplicated
-// comments there).
+// detailView shows one PR with four tabs: Overview / Outline / Files /
+// Comments. Outline is lazy: ordinary PR viewing keeps its current startup
+// cost until the user asks for structural analysis.
 type detailView struct {
 	prID int
 	tab  int
@@ -54,6 +55,10 @@ type detailView struct {
 	// how many files the Files filter lets through, for the tab-bar count.
 	search     [tabCount]searchBox
 	shownFiles int
+
+	outline outlineViewState
+	// outlineGen invalidates an analysis goroutine after a force reload.
+	outlineGen int
 }
 
 // visibleComments applies the Comments tab's filter. Every comment renderer
@@ -98,6 +103,7 @@ func newDetailView(a *app, id int) *detailView {
 func (v *detailView) load(a *app, force bool) {
 	d := a.detailFor(v.prID)
 	if force {
+		v.outlineGen++
 		*d = prDetail{}
 	}
 	id := v.prID
@@ -175,6 +181,10 @@ func (v *detailView) rebuild(a *app) {
 	switch v.tab {
 	case tabOverview:
 		v.vp[v.tab].Reset(v.overviewRows(a, d))
+	case tabOutline:
+		v.ensureOutline(a, d)
+		v.vp[v.tab].Reset(v.outlineRows(a, d))
+		v.syncOutlinePreview(a, d)
 	case tabFiles:
 		v.vp[v.tab].Reset(v.fileRows(a, d))
 	case tabComments:
@@ -782,8 +792,9 @@ func (v *detailView) render(a *app, s *Screen) {
 	}
 	labels := []string{
 		"1:Overview",
-		"2:Files (" + filesCount + ")",
-		"3:Comments (" + commentsCount + ")",
+		"2:Outline",
+		"3:Files (" + filesCount + ")",
+		"4:Comments (" + commentsCount + ")",
 	}
 	x := 1
 	for i, l := range labels {
@@ -797,6 +808,15 @@ func (v *detailView) render(a *app, s *Screen) {
 	paintSeparator(s, 3, a.w)
 
 	rect := Rect{X: 0, Y: 4, W: a.w, H: a.h - 5}
+	if v.tab == tabOutline && outlineSplit(a.w) {
+		leftW := outlineMasterWidth(a.w)
+		left := Rect{X: 0, Y: rect.Y, W: leftW, H: rect.H}
+		right := Rect{X: leftW + 1, Y: rect.Y, W: a.w - leftW - 1, H: rect.H}
+		v.vp[v.tab].Paint(s, left)
+		paintVSeparator(s, leftW, rect.Y, rect.Y+rect.H-1)
+		v.outline.preview.Paint(s, right)
+		return
+	}
 	if v.tab == tabComments && commentsSplit(a) {
 		leftW := commentMasterWidth(a.w)
 		left := Rect{X: 0, Y: rect.Y, W: leftW, H: rect.H}
@@ -881,6 +901,9 @@ func (v *detailView) handle(a *app, k Key) {
 		}
 		return
 	}
+	if v.tab == tabOutline && v.handleOutlineKey(a, k) {
+		return
+	}
 	switch {
 	case isKey(k, '/') && v.tab != tabOverview:
 		v.search[v.tab].open()
@@ -900,9 +923,12 @@ func (v *detailView) handle(a *app, k Key) {
 		v.tab = tabOverview
 		v.rebuild(a)
 	case isKey(k, '2'):
-		v.tab = tabFiles
+		v.tab = tabOutline
 		v.rebuild(a)
 	case isKey(k, '3'):
+		v.tab = tabFiles
+		v.rebuild(a)
+	case isKey(k, '4'):
 		v.tab = tabComments
 		v.rebuild(a)
 	case isKey(k, 'j') || k.Kind == KeyDown:
@@ -912,6 +938,7 @@ func (v *detailView) handle(a *app, k Key) {
 			vp.Scroll(1)
 		}
 		v.syncPreview(a)
+		v.syncOutlinePreview(a, a.detailFor(v.prID))
 	case isKey(k, 'k') || k.Kind == KeyUp:
 		if vp.Cursor >= 0 {
 			vp.MoveCursor(-1)
@@ -919,14 +946,19 @@ func (v *detailView) handle(a *app, k Key) {
 			vp.Scroll(-1)
 		}
 		v.syncPreview(a)
+		v.syncOutlinePreview(a, a.detailFor(v.prID))
 	case k.Kind == KeyCtrl && k.R == 'd':
-		if v.tab == tabComments && commentsSplit(a) {
+		if v.tab == tabOutline && outlineSplit(a.w) {
+			v.outline.preview.Scroll(v.outline.preview.H / 2)
+		} else if v.tab == tabComments && commentsSplit(a) {
 			v.cmtPreview.Scroll(v.cmtPreview.H / 2)
 		} else {
 			vp.Scroll(vp.H / 2)
 		}
 	case k.Kind == KeyCtrl && k.R == 'u':
-		if v.tab == tabComments && commentsSplit(a) {
+		if v.tab == tabOutline && outlineSplit(a.w) {
+			v.outline.preview.Scroll(-v.outline.preview.H / 2)
+		} else if v.tab == tabComments && commentsSplit(a) {
 			v.cmtPreview.Scroll(-v.cmtPreview.H / 2)
 		} else {
 			vp.Scroll(-vp.H / 2)
@@ -937,14 +969,18 @@ func (v *detailView) handle(a *app, k Key) {
 			vp.Cursor = i
 		}
 		v.syncPreview(a)
+		v.syncOutlinePreview(a, a.detailFor(v.prID))
 	case isKey(k, 'G'):
 		if i := vp.nextSelectable(len(vp.Rows)-1, -1); i >= 0 {
 			vp.Cursor = i
 			vp.EnsureVisible()
 		}
 		v.syncPreview(a)
+		v.syncOutlinePreview(a, a.detailFor(v.prID))
 	case k.Kind == KeyEnter:
 		switch v.tab {
+		case tabOutline:
+			v.activateOutlineRow(a)
 		case tabFiles:
 			if r := vp.Current(); r != nil && r.Kind == RowFile {
 				if a.cfg.FilesEnter == "builtin" {
@@ -1053,6 +1089,12 @@ func (v *detailView) footer(a *app) string {
 		return v.search[v.tab].prompt()
 	}
 	base := "Tab/h/l:タブ  j/k:移動  "
+	if v.tab == tabOutline {
+		base += "Enter:開く/diff  gd/gr:呼出先/元  O:並び順  "
+		if outlineSplit(a.w) {
+			base += "Ctrl-d/u:プレビュー  "
+		}
+	}
 	if v.tab == tabFiles {
 		if a.cfg.FilesEnter == "builtin" {
 			base += "Enter:diff  "
