@@ -309,13 +309,14 @@ func TestPendingDeleteConfirmFlow(t *testing.T) {
 	a, v := masterViewFixture(t)
 	moveCursorTo(t, v, 4)
 	v.handle(a, Key{Kind: KeyRune, R: 'x'})
-	if v.pendingDelete != 4 || !strings.Contains(a.status, "削除しますか") {
-		t.Fatalf("after x: pendingDelete=%d status=%q", v.pendingDelete, a.status)
+	if v.pendingAction.kind != detailActionDeleteComment || v.pendingAction.commentID != 4 ||
+		!strings.Contains(v.pendingAction.prompt, "削除しますか") {
+		t.Fatalf("after x: pending=%+v", v.pendingAction)
 	}
 	// Any key but y cancels.
 	v.handle(a, Key{Kind: KeyRune, R: 'n'})
-	if v.pendingDelete != 0 || !strings.Contains(a.status, "取り消し") {
-		t.Errorf("after n: pendingDelete=%d status=%q", v.pendingDelete, a.status)
+	if v.pendingAction.kind != detailActionNone || !strings.Contains(a.status, "取り消し") {
+		t.Errorf("after n: pending=%+v status=%q", v.pendingAction, a.status)
 	}
 }
 

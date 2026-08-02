@@ -1,8 +1,8 @@
 id = "boooowy.bitbucket-pr"
 name = "Bitbucket PR Viewer"
-version = "0.20.0"
+version = "0.21.0"
 min_herdr_version = "0.7.0"
-description = "Bitbucket Cloud PR viewer for herdr: review outline, diff, review comments, and comment posting without leaving the terminal."
+description = "Bitbucket Cloud PR viewer for herdr: review outline and diff, comment, approve, or decline without leaving the terminal."
 platforms = ["macos", "linux"]
 
 [[build]]

@@ -52,9 +52,9 @@ type detailView struct {
 	replyRoot  map[int]int
 	commentFor map[int]Comment
 
-	// pendingDelete is a comment ID waiting for the y-key confirmation of
-	// `x` (0 = none).
-	pendingDelete int
+	// pendingAction is the destructive/action confirmation waiting for y.
+	pendingAction   pendingDetailAction
+	prActionRunning bool
 
 	// search holds one `/` filter per tab (Overview has none); shownFiles is
 	// how many files the Files filter lets through, for the tab-bar count.
@@ -884,12 +884,10 @@ func stateStyle(state string) StyleID {
 // grabsKeys routes every key to handle while this tab's filter prompt is open.
 func (v *detailView) grabsKeys() bool { return v.search[v.tab].active }
 
-// interceptEsc cancels a pending x-delete or clears this tab's filter
+// interceptEsc cancels a pending action or clears this tab's filter
 // instead of popping the view.
 func (v *detailView) interceptEsc(a *app) bool {
-	if v.pendingDelete != 0 {
-		v.pendingDelete = 0
-		a.status = "削除を取り消しました"
+	if v.cancelPendingAction(a) {
 		return true
 	}
 	if v.search[v.tab].query() != "" {
@@ -909,18 +907,10 @@ func (v *detailView) handle(a *app, k Key) {
 		}
 		return
 	}
-	// A pending x-delete consumes the next key: y confirms, anything else
+	// A pending mutation consumes the next key: y confirms, anything else
 	// cancels.
-	if v.pendingDelete != 0 {
-		id := v.pendingDelete
-		v.pendingDelete = 0
-		if isKey(k, 'y') {
-			v.runCommentAction(a, "コメントを削除しました", func(cl *bbClient) error {
-				return cl.deleteComment(a.ctx.Workspace, a.ctx.Repo, v.prID, id)
-			})
-		} else {
-			a.status = "削除を取り消しました"
-		}
+	if v.pendingAction.kind != detailActionNone {
+		v.handlePendingAction(a, k)
 		return
 	}
 	if v.tab == tabOutline && v.handleOutlineKey(a, k) {
@@ -1038,7 +1028,17 @@ func (v *detailView) handle(a *app, k Key) {
 			}
 		}
 	case isKey(k, 'r'):
-		v.load(a, true)
+		if v.prActionRunning {
+			a.status = "PR操作の完了後に再読込してください"
+		} else {
+			v.load(a, true)
+		}
+	case isKey(k, 'a'):
+		v.beginPRAction(a, detailActionApprove)
+	case isKey(k, 'A'):
+		v.beginPRAction(a, detailActionUnapprove)
+	case isKey(k, 'X'):
+		v.beginPRAction(a, detailActionDecline)
 	case isKey(k, 'o'):
 		d := a.detailFor(v.prID)
 		if pr := v.displayPR(d); pr != nil {
@@ -1077,8 +1077,11 @@ func (v *detailView) handle(a *app, k Key) {
 			if c.Deleted {
 				a.status = "削除済みコメントです"
 			} else {
-				v.pendingDelete = c.ID
-				a.status = fmt.Sprintf("%s のコメントを削除しますか？ y で確定 / 他キーで取消", c.User.Name())
+				v.pendingAction = pendingDetailAction{
+					kind:      detailActionDeleteComment,
+					commentID: c.ID,
+					prompt:    fmt.Sprintf("%s のコメントを削除しますか？", c.User.Name()),
+				}
 			}
 		}
 	case isKey(k, 's') && v.tab == tabComments:
@@ -1102,7 +1105,7 @@ func (v *detailView) handle(a *app, k Key) {
 	case isKey(k, 'D'):
 		openInDiffTool(a, v.prID, "")
 	case isKey(k, '?'):
-		a.push(helpView{ctx: "detail"})
+		a.openHelp("detail")
 	}
 }
 
@@ -1147,13 +1150,20 @@ func (v *detailView) footer(a *app) string {
 		}
 		base += "x:削除  " + sKey + "  "
 	}
-	tail := "  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
+	actions := ""
+	if d := a.detailFor(v.prID); d.pr != nil && strings.EqualFold(d.pr.State, "OPEN") {
+		actions = "  a:承認 A:取消 X:Decline"
+	}
+	if v.prActionRunning {
+		actions = "  PR操作中…"
+	}
+	tail := actions + "  D:PR全体diff  r:再読込  o:ブラウザ  q:戻る"
 	switch q := v.search[v.tab].query(); {
 	case q != "":
 		// q clears the filter here too (the app routes q and Esc alike), so
 		// the hint must not promise that q goes back.
 		base += "/:" + q + "  q/Esc:絞込解除  "
-		tail = "  D:PR全体diff  r:再読込  o:ブラウザ"
+		tail = actions + "  D:PR全体diff  r:再読込  o:ブラウザ"
 	case v.tab != tabOverview:
 		base += "/:絞り込み  "
 	}

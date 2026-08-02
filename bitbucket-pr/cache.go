@@ -46,3 +46,25 @@ func savePRCache(ws, repo, state string, prs []PullRequest) {
 		debugf("cache: write: %v", err)
 	}
 }
+
+// mutatePRCache updates one PR in the cached first page. Returning false from
+// mutate removes it (used when an OPEN PR is declined). Missing entries are
+// left alone because their correct page position is unknown.
+func mutatePRCache(ws, repo, state string, id int, mutate func(*PullRequest) bool) {
+	prs := loadPRCache(ws, repo, state)
+	if prs == nil {
+		return
+	}
+	for i := range prs {
+		if prs[i].ID != id {
+			continue
+		}
+		if mutate(&prs[i]) {
+			savePRCache(ws, repo, state, prs)
+		} else {
+			prs = append(prs[:i], prs[i+1:]...)
+			savePRCache(ws, repo, state, prs)
+		}
+		return
+	}
+}

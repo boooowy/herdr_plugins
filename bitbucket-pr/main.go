@@ -1,4 +1,4 @@
-// bitbucket-pr is a herdr plugin: a read-only Bitbucket Cloud pull-request viewer.
+// bitbucket-pr is a herdr plugin: a Bitbucket Cloud pull-request reviewer.
 // It shows the PR list for the current repo, PR details, a hunk-by-hunk diff,
 // and review comments — all inside a herdr pane. Entrypoints wired up in
 // herdr-plugin.toml:
@@ -13,7 +13,7 @@ import (
 	"os"
 )
 
-const version = "0.20.0"
+const version = "0.21.0"
 
 func main() {
 	if len(os.Args) < 2 {
