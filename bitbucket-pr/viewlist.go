@@ -14,10 +14,12 @@ const (
 	listReviewerLimit   = 4
 	listTitleMaxWidth   = 64
 	listIDWidth         = 8
-	listCommentWidth    = 6
+	listCommentGap      = 2
+	listCommentWidth    = 7
 	listRoleWidth       = 3
 	listAuthorNameWidth = 16
 	listUpdatedWidth    = 10
+	listItemDivider     = "  ────  "
 )
 
 // listView is the PR list: one selectable row per PR plus a muted meta row
@@ -138,21 +140,24 @@ func (v *listView) rebuild(a *app) {
 		v.shown++
 		author := padRight(truncateWidth(pr.Author.Name(), listAuthorNameWidth), listAuthorNameWidth)
 		updated := padRight(truncateWidth(relTime(pr.UpdatedOn, now), listUpdatedWidth), listUpdatedWidth)
-		badge := ""
+		commentCount := ""
 		if pr.CommentCount > 0 {
-			badge = fmt.Sprintf("💬%d", pr.CommentCount)
+			commentCount = fmt.Sprintf("💬 %d", pr.CommentCount)
 		}
 		titleW := listTitleWidth(a)
 		spans := []Span{
 			{fmt.Sprintf(" #%-5d ", pr.ID), styleMeta},
 			{padRight(truncateWidth(pr.Title, titleW), titleW), styleNone},
-			{padRight(truncateWidth(badge, listCommentWidth), listCommentWidth), styleDim},
 			{"A: ", styleDim},
 		}
 		spans, avatars := appendAccountName(spans, pr.Author, author, styleDim, styleDim, a.avatarsEnabled())
-		spans = append(spans, Span{"  " + updated, styleDim})
+		spans = append(spans,
+			Span{"  " + updated, styleDim},
+			Span{strings.Repeat(" ", listCommentGap) + padRight(truncateWidth(commentCount, listCommentWidth), listCommentWidth), styleNone},
+		)
 		prRow := row(RowPR, i, true, spans...)
 		prRow.Avatars = avatars
+		prRow.CursorRows = 2
 		rows = append(rows, prRow)
 		rows = append(rows, listMetaRow(a, pr))
 	}
@@ -177,7 +182,7 @@ func listTitleWidth(a *app) int {
 	if a.avatarsEnabled() {
 		avatarWidth = compactAvatarCols
 	}
-	width := a.w - listIDWidth - listCommentWidth - listRoleWidth - avatarWidth - listAuthorNameWidth - 2 - listUpdatedWidth
+	width := a.w - listIDWidth - listRoleWidth - avatarWidth - listAuthorNameWidth - 2 - listUpdatedWidth - listCommentGap - listCommentWidth
 	if width > listTitleMaxWidth {
 		width = listTitleMaxWidth
 	}
@@ -205,7 +210,7 @@ func listMetaRow(a *app, pr *PullRequest) Row {
 	titleWidth := listTitleWidth(a)
 	if !a.avatarsEnabled() {
 		return textRow(
-			Span{strings.Repeat(" ", listIDWidth), styleNone},
+			Span{listItemDivider, styleDim},
 			Span{padRight(truncateWidth(branch, titleWidth), titleWidth), styleDim},
 		)
 	}
@@ -223,9 +228,8 @@ func listMetaRow(a *app, pr *PullRequest) Row {
 	}
 
 	spans := []Span{
-		{strings.Repeat(" ", listIDWidth), styleNone},
+		{listItemDivider, styleDim},
 		{padRight(truncateWidth(branch, titleWidth), titleWidth), styleDim},
-		{strings.Repeat(" ", listCommentWidth), styleDim},
 		{"R: ", styleDim},
 	}
 	available := a.w - spansWidth(spans)

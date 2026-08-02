@@ -642,7 +642,7 @@ func TestListAccountColumnsStayAlignedAcrossContentLengths(t *testing.T) {
 
 	v := &listView{}
 	v.rebuild(a)
-	wantCol := listIDWidth + listTitleMaxWidth + listCommentWidth + listRoleWidth
+	wantCol := listIDWidth + listTitleMaxWidth + listRoleWidth
 	for i := range a.prs {
 		author := v.vp.Rows[i*2]
 		reviewers := v.vp.Rows[i*2+1]
@@ -655,7 +655,7 @@ func TestListAccountColumnsStayAlignedAcrossContentLengths(t *testing.T) {
 	}
 }
 
-func TestListNarrowLayoutShrinksReviewerStripAfterTitle(t *testing.T) {
+func TestListNarrowLayoutUsesAvailableReviewerSpace(t *testing.T) {
 	a := &app{w: 24, h: 10, avatars: &avatarGraphics{}}
 	pr := PullRequest{ID: 1, Title: strings.Repeat("title", 20)}
 	pr.Author.DisplayName = "author"
@@ -674,10 +674,10 @@ func TestListNarrowLayoutShrinksReviewerStripAfterTitle(t *testing.T) {
 		t.Fatalf("title width = %d, want 1", got)
 	}
 	meta := v.vp.Rows[1]
-	if len(meta.Avatars) != 1 {
+	if len(meta.Avatars) != listReviewerLimit {
 		t.Fatalf("narrow reviewer avatars = %+v", meta.Avatars)
 	}
-	if text := spansText(meta); !strings.Contains(text, "+5") {
+	if text := spansText(meta); !strings.Contains(text, "+2") {
 		t.Fatalf("narrow reviewer overflow = %q", text)
 	}
 }

@@ -35,10 +35,10 @@ PR 一覧:
 ```text
  Bitbucket PRs — myworkspace/my-app   OPEN  MERGED  DECLINED  12件
 ──────────────────────────────────────────────────────────────────────
- #482   feat: 経路検索のキャッシュ層を追加       💬4   A: [画像] kayashima       2時間前
-        feature/route-cache → develop               R: [画像✓][画像 ] +2
- #479   fix: null チェック漏れ                            A: [画像] tanaka          1日前
-        fix/null-check → develop                     R: [画像 ]
+ #482   feat: 経路検索のキャッシュ層を追加       A: [画像] kayashima       2時間前  💬 4
+        feature/route-cache → develop          R: [画像✓][画像 ] +2
+ #479   fix: null チェック漏れ                     A: [画像] tanaka          1日前
+        fix/null-check → develop                R: [画像 ]
 ──────────────────────────────────────────────────────────────────────
  j/k:移動  Enter:開く  Tab/s:state切替  /:絞り込み  y:URL  b:ブランチ  r:再読込  q:終了
 ```
