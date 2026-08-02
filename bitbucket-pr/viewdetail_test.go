@@ -492,6 +492,70 @@ func TestTabBadgesShowLoadingUntilFetched(t *testing.T) {
 	}
 }
 
+func TestDetailUsesListSummaryWhileFullPRLoads(t *testing.T) {
+	a := &app{w: 100, h: 24, detail: map[int]*prDetail{}}
+	updated := time.Now().Add(-time.Hour)
+	summary := &PullRequest{ID: 32, Title: "一覧から即時表示", State: "OPEN", UpdatedOn: updated}
+	summary.Author.DisplayName = "深谷 颯佑"
+	summary.Source.Branch.Name = "feature/fast-detail"
+	summary.Destination.Branch.Name = "main"
+	reviewer := Participant{Role: "REVIEWER", State: "approved", Approved: true}
+	reviewer.User.DisplayName = "Reviewer"
+	summary.Participants = []Participant{reviewer}
+
+	v := &detailView{prID: 32, summary: summary}
+	v.rebuild(a)
+	s := NewScreen(a.w, a.h)
+	v.render(a, s)
+
+	if header := screenRow(s, 0); !strings.Contains(header, "#32 一覧から即時表示") ||
+		!strings.Contains(header, "OPEN") || strings.Contains(header, "読み込み中") {
+		t.Errorf("summary header = %q", header)
+	}
+	if meta := screenRow(s, 1); !strings.Contains(meta, "feature/fast-detail → main") ||
+		!strings.Contains(meta, "by 深谷 颯佑") {
+		t.Errorf("summary meta = %q", meta)
+	}
+	joined := ""
+	for _, r := range v.vp[tabOverview].Rows {
+		joined += spansText(r) + "\n"
+	}
+	if !strings.Contains(joined, "説明を読み込み中") || !strings.Contains(joined, "Reviewer") {
+		t.Errorf("summary overview = %q", joined)
+	}
+
+	full := *summary
+	full.Summary.Raw = "完全な説明"
+	full.Source.Commit.Hash = "1234567890abcdef"
+	a.detailFor(32).pr = &full
+	v.rebuild(a)
+	joined = ""
+	for _, r := range v.vp[tabOverview].Rows {
+		joined += spansText(r) + "\n"
+	}
+	if !strings.Contains(joined, "完全な説明") || strings.Contains(joined, "読み込み中") {
+		t.Errorf("full overview = %q", joined)
+	}
+	s = NewScreen(a.w, a.h)
+	v.render(a, s)
+	if meta := screenRow(s, 1); !strings.Contains(meta, "1234567…") {
+		t.Errorf("full meta = %q", meta)
+	}
+}
+
+func TestDetailWithoutListSummaryKeepsLoadingScreen(t *testing.T) {
+	a := &app{w: 80, h: 20, detail: map[int]*prDetail{}}
+	v := &detailView{prID: 32}
+	s := NewScreen(a.w, a.h)
+	v.render(a, s)
+	if header := screenRow(s, 0); !strings.Contains(header, "#32 を読み込み中") {
+		t.Errorf("direct URL header = %q", header)
+	}
+	if tabs := screenRow(s, 2); strings.Contains(tabs, "Overview") {
+		t.Errorf("tabs should wait for the first PR payload: %q", tabs)
+	}
+}
+
 func TestReplyTarget(t *testing.T) {
 	to := 15
 	inline := CommentThread{Root: mkComment(1, 0, "a.go", nil, &to, false, time.Now())}

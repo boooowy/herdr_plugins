@@ -360,7 +360,7 @@ make plugin-link
 # デバッグ
 herdr plugin action invoke open --plugin boooowy.bitbucket-pr
 herdr plugin log list --plugin boooowy.bitbucket-pr --limit 10
-touch /tmp/bitbucket-pr-debug.log   # 詳細ログ有効化
+touch /tmp/bitbucket-pr-debug.log   # API取得処理ごとの所要時間を含む詳細ログを有効化
 
 # API 応答の目視（ペイン外で実行）
 ./bin/bitbucket-pr dump prs

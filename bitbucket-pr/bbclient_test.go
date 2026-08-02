@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -152,6 +153,50 @@ func TestRetryOnTransportError(t *testing.T) {
 	}
 	if pr.Title != "ok" || calls.Load() != 2 {
 		t.Errorf("pr=%+v calls=%d", pr, calls.Load())
+	}
+}
+
+func TestDetailEndpointsTrimPayloadFields(t *testing.T) {
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/5", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("fields"); got != detailPRFields {
+			t.Errorf("detail fields = %q, want %q", got, detailPRFields)
+		}
+		fmt.Fprint(w, `{"id":5,"title":"trimmed"}`)
+	})
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/5/diffstat", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("fields"); got != diffStatFields {
+			t.Errorf("diffstat fields = %q, want %q", got, diffStatFields)
+		}
+		fmt.Fprint(w, `{"values":[{"status":"modified","new":{"path":"a.go"}}]}`)
+	})
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/5/comments", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("fields"); got != commentFields {
+			t.Errorf("comment fields = %q, want %q", got, commentFields)
+		}
+		if r.URL.Query().Get("page") == "2" {
+			fmt.Fprint(w, `{"values":[{"id":2}]}`)
+			return
+		}
+		fmt.Fprintf(w, `{"values":[{"id":1}],"next":"%s/2.0/repositories/ws/repo/pullrequests/5/comments?page=2&fields=%s"}`,
+			srv.URL, url.QueryEscape(commentFields))
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := testClient(srv)
+	pr, err := c.getPR("ws", "repo", 5)
+	if err != nil || pr.Title != "trimmed" {
+		t.Fatalf("getPR: pr=%+v err=%v", pr, err)
+	}
+	stats, err := c.diffStat("ws", "repo", 5)
+	if err != nil || len(stats) != 1 || stats[0].Path() != "a.go" {
+		t.Fatalf("diffStat: stats=%+v err=%v", stats, err)
+	}
+	comments, err := c.comments("ws", "repo", 5)
+	if err != nil || len(comments) != 2 || comments[1].ID != 2 {
+		t.Fatalf("comments: comments=%+v err=%v", comments, err)
 	}
 }
 

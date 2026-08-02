@@ -22,6 +22,11 @@ type detailView struct {
 	prID int
 	tab  int
 	vp   [tabCount]Viewport
+	// summary is the trimmed PR object handed over by the list view. It lets
+	// the detail screen paint immediately while the full PR response (notably
+	// its description and commit hashes) is still in flight. Direct PR URLs
+	// have no summary and retain the ordinary loading screen.
+	summary *PullRequest
 
 	// inlineThreadFor maps a comment root ID to its inline thread — how the
 	// Comments tab's Enter finds the file/line to jump to in the diff view.
@@ -92,10 +97,19 @@ func commentMasterWidth(w int) int {
 	return lw
 }
 
-func newDetailView(a *app, id int) *detailView {
-	v := &detailView{prID: id}
+func newDetailView(a *app, id int, summary *PullRequest) *detailView {
+	v := &detailView{prID: id, summary: summary}
 	v.load(a, false)
 	return v
+}
+
+// displayPR returns the complete PR once fetched, otherwise the compact list
+// snapshot used for the immediate first frame.
+func (v *detailView) displayPR(d *prDetail) *PullRequest {
+	if d.pr != nil {
+		return d.pr
+	}
+	return v.summary
 }
 
 // load fetches whatever is missing for this PR (detail, diffstat, comments,
@@ -150,10 +164,13 @@ func (v *detailView) load(a *app, force bool) {
 			if err != nil {
 				return nil, err
 			}
+			// Parsing can be noticeable on a large PR. Keep it on this worker
+			// goroutine so applying the result never stalls terminal input.
+			files := ParseUnifiedDiff(text)
 			return func(a *app) {
 				dd := a.detailFor(id)
 				dd.diffText = text
-				dd.files = ParseUnifiedDiff(text)
+				dd.files = files
 				v.rebuild(a)
 				rebuildTopDiffView(a, id)
 				if req := a.pendingDifftool; req != nil && req.prID == id {
@@ -200,11 +217,14 @@ func (v *detailView) rebuild(a *app) {
 
 func (v *detailView) overviewRows(a *app, d *prDetail) []Row {
 	var rows []Row
-	if d.pr == nil {
+	pr := v.displayPR(d)
+	if pr == nil {
 		return rows
 	}
-	desc := d.pr.Description()
-	if desc == "" {
+	desc := pr.Description()
+	if d.pr == nil {
+		rows = append(rows, textRow(Span{" (説明を読み込み中…)", styleDim}))
+	} else if desc == "" {
 		rows = append(rows, textRow(Span{" (説明はありません)", styleDim}))
 	} else {
 		for _, spans := range mdStyledLines(desc, a.w-3, styleNone) {
@@ -212,7 +232,7 @@ func (v *detailView) overviewRows(a *app, d *prDetail) []Row {
 		}
 	}
 
-	reviewers := pullRequestReviewers(d.pr)
+	reviewers := pullRequestReviewers(pr)
 	approvedCount := 0
 	for _, reviewer := range reviewers {
 		if reviewer.Status == reviewerApproved {
@@ -748,12 +768,12 @@ func diffTruncated(d *prDetail) string {
 
 func (v *detailView) render(a *app, s *Screen) {
 	d := a.detailFor(v.prID)
-	if d.pr == nil {
+	pr := v.displayPR(d)
+	if pr == nil {
 		s.WriteString(1, 0, fmt.Sprintf("#%d を読み込み中…", v.prID), styleDim, a.w)
 		paintSeparator(s, 1, a.w)
 		return
 	}
-	pr := d.pr
 
 	headerX := 1
 	if a.avatarsEnabled() && pr.Author.AvatarURL() != "" {
@@ -767,10 +787,12 @@ func (v *detailView) render(a *app, s *Screen) {
 	s.WriteString(headerX, 0, fmt.Sprintf("#%d %s", pr.ID, truncateWidth(pr.Title, titleW-7)), styleTitle, a.w)
 	s.WriteString(a.w-1-displayWidth(pr.State), 0, pr.State, stateStyle(pr.State), a.w)
 
-	meta := fmt.Sprintf("%s → %s (%s)  by %s  updated %s",
-		pr.Source.Branch.Name, pr.Destination.Branch.Name,
-		truncateWidth(pr.Source.Commit.Hash, 8),
-		pr.Author.Name(), relTime(pr.UpdatedOn, time.Now()))
+	route := fmt.Sprintf("%s → %s", pr.Source.Branch.Name, pr.Destination.Branch.Name)
+	if pr.Source.Commit.Hash != "" {
+		route += " (" + truncateWidth(pr.Source.Commit.Hash, 8) + ")"
+	}
+	meta := fmt.Sprintf("%s  by %s  updated %s",
+		route, pr.Author.Name(), relTime(pr.UpdatedOn, time.Now()))
 	s.WriteString(headerX, 1, truncateWidth(meta, a.w-headerX-1), styleDim, a.w)
 
 	// Tab bar. Counts show "…" until their fetch lands — a flash of
@@ -1019,18 +1041,18 @@ func (v *detailView) handle(a *app, k Key) {
 		v.load(a, true)
 	case isKey(k, 'o'):
 		d := a.detailFor(v.prID)
-		if d.pr != nil {
-			openInBrowser(a, d.pr.WebURL())
+		if pr := v.displayPR(d); pr != nil {
+			openInBrowser(a, pr.WebURL())
 		}
 	case isKey(k, 'y'):
 		d := a.detailFor(v.prID)
-		if d.pr != nil {
-			copyToClipboard(a, d.pr.WebURL())
+		if pr := v.displayPR(d); pr != nil {
+			copyToClipboard(a, pr.WebURL())
 		}
 	case isKey(k, 'b'):
 		d := a.detailFor(v.prID)
-		if d.pr != nil {
-			copyToClipboard(a, d.pr.Source.Branch.Name)
+		if pr := v.displayPR(d); pr != nil {
+			copyToClipboard(a, pr.Source.Branch.Name)
 		}
 	case isKey(k, 'c'):
 		// Reply to the exact comment under the Comments-tab cursor (a reply
