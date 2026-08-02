@@ -219,8 +219,11 @@ Files、Commentsは通常どおり利用できます。
 再表示しても毎回解析しません。`r` は画面上の結果を破棄して再読込しますが、commitが同じなら
 永続キャッシュを再利用します。
 
-対応言語は Go、Rust、Python、TypeScript/TSX、JavaScript/JSX、Java です。未対応言語、生成物、
-バイナリはスキップ理由を表示し、Filesタブで引き続き確認できます。
+対応言語は Go、Rust、Python、TypeScript/TSX、JavaScript/JSX、Java、Bash です。Bashは
+`.sh`、`.bash`と、`#!/bin/bash`または`#!/usr/bin/env bash`で始まる拡張子なしファイルを
+解析します。関数呼び出しは名前を静的に確定できるものだけを関連付け、変数経由の実行、
+`eval`、動的な`source`は対象外です。未対応言語、生成物、バイナリはスキップ理由を表示し、
+Filesタブで引き続き確認できます。
 
 ## キーバインド（ビューア内。`?` でその画面で使えるキーを表示）
 

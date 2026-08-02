@@ -22,7 +22,7 @@ func outlineFixture() *outlineResult {
 		Signature: "func TestMain(t *testing.T)", Change: outlineAdded, StartLine: 20, EndLine: 24, Test: true,
 	}
 	return &outlineResult{
-		Schema: 1, SourceHash: "source", DestinationHash: "destination",
+		Schema: outlineSchemaVersion, SourceHash: "source", DestinationHash: "destination",
 		Files: []outlineFile{
 			{Path: "acallee/service.go", Language: "Go", Lines: 900, Symbols: []outlineSymbol{callee}},
 			{Path: "zcaller/main.go", Language: "Go", Lines: 40, Symbols: []outlineSymbol{caller}, TestSymbols: []outlineSymbol{testSymbol}},

@@ -151,7 +151,7 @@ func gitCandidatePaths(repoDir, hash string, names []string) ([]string, error) {
 		for _, line := range strings.Split(string(out), "\n") {
 			line = strings.TrimSpace(line)
 			line = strings.TrimPrefix(line, prefix)
-			if _, ok := outlineLanguageForPath(line); ok {
+			if outlineMaySupportPath(line) {
 				seen[filepath.ToSlash(line)] = true
 			}
 		}

@@ -23,7 +23,7 @@ func TestOutlineCacheRoundTripAndIdentity(t *testing.T) {
 	if got := loadOutlineCache("team/name", "repo name", "source-1", "other"); got != nil {
 		t.Fatalf("destination mismatch returned %+v", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "cache", "outline-v1-team_name__repo_name__source-1__dest-1.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "cache", "outline-v2-team_name__repo_name__source-1__dest-1.json")); err != nil {
 		t.Fatal(err)
 	}
 }

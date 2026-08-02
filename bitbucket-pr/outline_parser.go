@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
+	tsbash "github.com/tree-sitter/tree-sitter-bash/bindings/go"
 	tsgolang "github.com/tree-sitter/tree-sitter-go/bindings/go"
 	tsjava "github.com/tree-sitter/tree-sitter-java/bindings/go"
 	tsjavascript "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
@@ -41,9 +42,54 @@ func outlineLanguageForPath(path string) (outlineLanguage, bool) {
 		return outlineLanguage{"JavaScript", func() *sitter.Language { return sitter.NewLanguage(tsjavascript.Language()) }}, true
 	case ".java":
 		return outlineLanguage{"Java", func() *sitter.Language { return sitter.NewLanguage(tsjava.Language()) }}, true
+	case ".sh", ".bash":
+		return bashOutlineLanguage(), true
 	default:
 		return outlineLanguage{}, false
 	}
+}
+
+func outlineLanguageForFile(path string, source []byte) (outlineLanguage, bool) {
+	if lang, ok := outlineLanguageForPath(path); ok {
+		return lang, true
+	}
+	if filepath.Ext(path) == "" && bashShebang(source) {
+		return bashOutlineLanguage(), true
+	}
+	return outlineLanguage{}, false
+}
+
+func bashOutlineLanguage() outlineLanguage {
+	return outlineLanguage{"Bash", func() *sitter.Language { return sitter.NewLanguage(tsbash.Language()) }}
+}
+
+// outlineMaySupportPath is a cheap prefilter used before loading a blob. Files
+// without an extension remain candidates because Bash scripts commonly rely
+// on a shebang instead of a .sh suffix.
+func outlineMaySupportPath(path string) bool {
+	if _, ok := outlineLanguageForPath(path); ok {
+		return true
+	}
+	return filepath.Ext(path) == ""
+}
+
+func bashShebang(source []byte) bool {
+	line := string(source)
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+	if !strings.HasPrefix(line, "#!") {
+		return false
+	}
+	fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, "#!")))
+	if len(fields) == 0 {
+		return false
+	}
+	if fields[0] == "/bin/bash" {
+		return true
+	}
+	return fields[0] == "/usr/bin/env" && len(fields) >= 2 && fields[1] == "bash"
 }
 
 type rawOutlineSymbol struct {
@@ -63,7 +109,7 @@ type rawOutlineSymbol struct {
 func (s rawOutlineSymbol) pairKey() string { return s.Kind + "\x00" + s.Name }
 
 func parseOutlineFile(path string, source []byte) ([]rawOutlineSymbol, string, error) {
-	lang, ok := outlineLanguageForPath(path)
+	lang, ok := outlineLanguageForFile(path, source)
 	if !ok {
 		return nil, "unsupported language", nil
 	}
@@ -192,6 +238,10 @@ func outlineSymbolNode(language string, node *sitter.Node, source []byte) (strin
 		case "annotation_type_declaration":
 			return "annotation", name, name != nil
 		}
+	case "Bash":
+		if kind == "function_definition" {
+			return "fn", name, name != nil
+		}
 	}
 	return "", nil, false
 }
@@ -261,6 +311,10 @@ func outlineNodeCalls(language string, symbol *sitter.Node, source []byte) []str
 			target = node.ChildByFieldName("name")
 		case "object_creation_expression":
 			target = node.ChildByFieldName("type")
+		case "command":
+			if language == "Bash" {
+				target = node.ChildByFieldName("name")
+			}
 		}
 		if name := outlineReferenceName(target, source); usefulOutlineName(name) {
 			calls = append(calls, name)
@@ -285,7 +339,7 @@ func outlineReferenceName(node *sitter.Node, source []byte) string {
 		return ""
 	}
 	switch node.Kind() {
-	case "identifier", "field_identifier", "property_identifier", "type_identifier":
+	case "identifier", "field_identifier", "property_identifier", "type_identifier", "word":
 		return strings.TrimSpace(node.Utf8Text(source))
 	}
 	// Member/qualified expressions put the callable name at the right edge.
@@ -345,6 +399,12 @@ func outlineTestSymbol(path string, node *sitter.Node, source []byte) bool {
 		return strings.Contains(string(source[start:node.StartByte()]), "#[test]")
 	case ".java":
 		return strings.Contains(p, "/src/test/") || strings.Contains(p, "/test/") || strings.HasSuffix(base, "test.java")
+	case ".sh", ".bash":
+		return strings.Contains(p, "/tests/") || strings.Contains(p, "/test/") ||
+			strings.HasSuffix(base, "_test.sh") || strings.HasSuffix(base, "_test.bash")
+	}
+	if filepath.Ext(path) == "" && bashShebang(source) {
+		return strings.Contains(p, "/tests/") || strings.Contains(p, "/test/") || strings.HasSuffix(base, "_test")
 	}
 	return false
 }

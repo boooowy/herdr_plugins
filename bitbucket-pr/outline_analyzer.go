@@ -85,12 +85,12 @@ func analyzeOutline(repoDir, sourceHash, destinationHash string, diffs []FileDif
 			continue
 		}
 		if f.NewPath != "" {
-			if _, ok := outlineLanguageForPath(f.NewPath); ok {
+			if outlineMaySupportPath(f.NewPath) {
 				newPaths = append(newPaths, f.NewPath)
 			}
 		}
 		if f.OldPath != "" {
-			if _, ok := outlineLanguageForPath(f.OldPath); ok {
+			if outlineMaySupportPath(f.OldPath) {
 				oldPaths = append(oldPaths, f.OldPath)
 			}
 		}
@@ -211,14 +211,18 @@ func classifyOutlineFile(diff *FileDiff, newSource, oldSource map[string][]byte,
 		file.Skipped = "binary"
 		return file, nil
 	}
-	lang, supported := outlineLanguageForPath(path)
+	sourcePath := diff.NewPath
+	oldPath := diff.OldPath
+	languageSource := newSource[sourcePath]
+	if sourcePath == "" {
+		languageSource = oldSource[oldPath]
+	}
+	lang, supported := outlineLanguageForFile(path, languageSource)
 	if !supported {
 		file.Skipped = "unsupported language"
 		return file, nil
 	}
 	file.Language = lang.Name
-	sourcePath := diff.NewPath
-	oldPath := diff.OldPath
 	if sourcePath != "" {
 		file.Lines = sourceLineCount(newSource[sourcePath])
 	}

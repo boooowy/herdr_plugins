@@ -46,6 +46,9 @@ const helper = (value) => true
   boolean helper(int value) { return true; }
 }
 `, "run", "method", "helper", "App"},
+		{"scripts/run.sh", `run() { helper "$1"; }
+function helper { :; }
+`, "run", "fn", "helper", "helper"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -65,6 +68,61 @@ const helper = (value) => true
 			}
 			if rawSymbolNamed(symbols, tt.wantOther) == nil {
 				t.Errorf("%s missing in %+v", tt.wantOther, symbols)
+			}
+		})
+	}
+}
+
+func TestParseOutlineFileBashShebangsAndDynamicCalls(t *testing.T) {
+	for _, shebang := range []string{"#!/bin/bash", "#!/usr/bin/env bash"} {
+		t.Run(shebang, func(t *testing.T) {
+			source := []byte(shebang + `
+run() {
+  helper
+  "$target"
+}
+helper() { :; }
+`)
+			symbols, skipped, err := parseOutlineFile("script", source)
+			if err != nil || skipped != "" {
+				t.Fatalf("parse: skipped=%q err=%v", skipped, err)
+			}
+			run := rawSymbolNamed(symbols, "run")
+			if run == nil || run.Language != "Bash" || run.Kind != "fn" {
+				t.Fatalf("run = %+v", run)
+			}
+			if !containsString(run.Calls, "helper") {
+				t.Errorf("run calls = %v, want helper", run.Calls)
+			}
+			if containsString(run.Calls, "target") {
+				t.Errorf("dynamic command unexpectedly linked: %v", run.Calls)
+			}
+		})
+	}
+
+	if _, skipped, err := parseOutlineFile("script.txt", []byte("#!/bin/bash\nrun() { :; }\n")); err != nil || skipped != "unsupported language" {
+		t.Fatalf("extension-bearing shebang = skipped:%q err:%v", skipped, err)
+	}
+}
+
+func TestParseOutlineFileBashTestClassification(t *testing.T) {
+	tests := []struct {
+		path   string
+		source string
+	}{
+		{"tests/run.sh", "run() { :; }\n"},
+		{"scripts/run_test.bash", "run() { :; }\n"},
+		{"scripts/run_test", "#!/usr/bin/env bash\nrun() { :; }\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			symbols, skipped, err := parseOutlineFile(tt.path, []byte(tt.source))
+			if err != nil || skipped != "" {
+				t.Fatalf("parse: skipped=%q err=%v", skipped, err)
+			}
+			run := rawSymbolNamed(symbols, "run")
+			if run == nil || !run.Test {
+				t.Fatalf("run test classification = %+v", run)
 			}
 		})
 	}
@@ -165,6 +223,102 @@ func TestClassifyOutlineDeletionOnlyBodyChange(t *testing.T) {
 		map[string][]rawOutlineSymbol{"main.go": newSymbols}, map[string][]rawOutlineSymbol{"main.go": oldSymbols})
 	if len(file.Symbols) != 1 || file.Symbols[0].Name != "Run" || file.Symbols[0].Change != outlineBodyOnly {
 		t.Fatalf("deletion-only classification = %+v", file.Symbols)
+	}
+}
+
+func TestClassifyOutlineBashChanges(t *testing.T) {
+	tests := []struct {
+		name       string
+		oldSource  string
+		newSource  string
+		lines      []DiffLine
+		wantChange outlineChange
+	}{
+		{
+			name:       "added",
+			oldSource:  "#!/bin/bash\nhelper() { :; }\n",
+			newSource:  "#!/bin/bash\nrun() { helper; }\nhelper() { :; }\n",
+			lines:      []DiffLine{{Kind: LineAdd, NewNo: 2, Text: "run() { helper; }"}},
+			wantChange: outlineAdded,
+		},
+		{
+			name:       "removed",
+			oldSource:  "#!/bin/bash\nrun() { helper; }\nhelper() { :; }\n",
+			newSource:  "#!/bin/bash\nhelper() { :; }\n",
+			lines:      []DiffLine{{Kind: LineDel, OldNo: 2, Text: "run() { helper; }"}},
+			wantChange: outlineRemoved,
+		},
+		{
+			name:       "body only",
+			oldSource:  "#!/bin/bash\nrun() {\n  helper old\n}\n",
+			newSource:  "#!/bin/bash\nrun() {\n  helper new\n}\n",
+			lines:      []DiffLine{{Kind: LineDel, OldNo: 3, Text: "helper old"}, {Kind: LineAdd, NewNo: 3, Text: "helper new"}},
+			wantChange: outlineBodyOnly,
+		},
+		{
+			name:       "signature",
+			oldSource:  "#!/bin/bash\nrun() { helper; }\n",
+			newSource:  "#!/bin/bash\nfunction run { helper; }\n",
+			lines:      []DiffLine{{Kind: LineDel, OldNo: 2, Text: "run() { helper; }"}, {Kind: LineAdd, NewNo: 2, Text: "function run { helper; }"}},
+			wantChange: outlineSignatureChanged,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldSource, newSource := []byte(tt.oldSource), []byte(tt.newSource)
+			oldSymbols, _, err := parseOutlineFile("script", oldSource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			newSymbols, _, err := parseOutlineFile("script", newSource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			diff := &FileDiff{OldPath: "script", NewPath: "script", Hunks: []Hunk{{Lines: tt.lines}}}
+			file, _ := classifyOutlineFile(diff,
+				map[string][]byte{"script": newSource}, map[string][]byte{"script": oldSource},
+				map[string][]rawOutlineSymbol{"script": newSymbols}, map[string][]rawOutlineSymbol{"script": oldSymbols})
+			var run *outlineSymbol
+			for i := range file.Symbols {
+				if file.Symbols[i].Name == "run" {
+					run = &file.Symbols[i]
+					break
+				}
+			}
+			if run == nil || run.Change != tt.wantChange {
+				t.Fatalf("run = %+v, symbols = %+v", run, file.Symbols)
+			}
+		})
+	}
+}
+
+func TestAnalyzeOutlineBashShebangFindsExtensionlessCallee(t *testing.T) {
+	dir := t.TempDir()
+	gitTest(t, dir, "init", "-q")
+	gitTest(t, dir, "config", "user.email", "test@example.com")
+	gitTest(t, dir, "config", "user.name", "Test")
+	writeTestFile(t, dir, "script", "#!/bin/bash\nrun() {\n  helper old\n}\n")
+	writeTestFile(t, dir, "bin/helper", "#!/usr/bin/env bash\nhelper() { :; }\n")
+	gitTest(t, dir, "add", "script", "bin/helper")
+	gitTest(t, dir, "commit", "-qm", "base")
+	base := strings.TrimSpace(gitTest(t, dir, "rev-parse", "HEAD"))
+
+	writeTestFile(t, dir, "script", "#!/bin/bash\nrun() {\n  helper new\n}\n")
+	gitTest(t, dir, "add", "script")
+	gitTest(t, dir, "commit", "-qm", "head")
+	head := strings.TrimSpace(gitTest(t, dir, "rev-parse", "HEAD"))
+	diffText := gitTest(t, dir, "diff", base, head, "--")
+
+	result, err := analyzeOutline(dir, head, base, ParseUnifiedDiff(diffText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := resultSymbolNamed(result, "run")
+	if run == nil || run.Change != outlineBodyOnly {
+		t.Fatalf("run = %+v", run)
+	}
+	if len(run.Callees) != 1 || run.Callees[0].Name != "helper" || run.Callees[0].Path != "bin/helper" {
+		t.Fatalf("run callees = %+v", run.Callees)
 	}
 }
 

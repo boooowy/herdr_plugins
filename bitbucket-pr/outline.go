@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	outlineSchemaVersion = 1
+	outlineSchemaVersion = 2
 	outlineHighFanIn     = 3
 	outlineLargeFileLine = 800
 )
