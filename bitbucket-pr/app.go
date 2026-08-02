@@ -46,7 +46,8 @@ type app struct {
 	w, h     int
 	stack    []view
 	status   string // transient footer message (last error)
-	loading  int    // in-flight fetch count
+	help     *helpOverlay
+	loading  int // in-flight fetch count
 	quit     bool
 	resultCh chan func(*app)
 
@@ -235,6 +236,7 @@ func runUI() {
 		frame := NewScreen(a.w, a.h)
 		a.top().render(a, frame)
 		paintFooter(a, frame)
+		paintOverlay(a, frame)
 		frame.Flush(out, a.sgr)
 		out.Flush()
 		if a.avatars != nil {
@@ -264,6 +266,8 @@ func runUI() {
 			switch {
 			case k.Kind == KeyCtrl && k.R == 'c':
 				return
+			case a.help != nil:
+				a.help.handle(a, k)
 			case grabsKeys(a.top()):
 				// A view taking text input (the / filter) gets every key,
 				// q and Esc included.

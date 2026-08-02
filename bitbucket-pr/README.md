@@ -1,12 +1,13 @@
 # bitbucket-pr — Bitbucket PR Viewer
 
-Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧・コメントするビューアです。
+Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧・レビューするビューアです。
 PR 一覧 → 詳細（説明・変更シンボル・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）
 の閲覧に加え、`c` キーでコード行へのインラインコメント・返信・PRコメントを投稿できます
-（本文はいつものエディタが popup で開きます）。approve / merge は非対応です（`o` でブラウザへ）。
+（本文はいつものエディタが popup で開きます）。PR詳細では承認・承認取消・Declineも行えます。
+merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
-- version: `0.20.0`
+- version: `0.21.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -156,7 +157,8 @@ export ATLASSIAN_API_TOKEN="<APIトークン>"
 
 API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens> で作成します
 （App Password は 2026年6月に廃止済みのため使えません）。
-**コメント投稿（`c`）を使う場合は、トークンに pullrequest への write スコープが必要です**
+**コメント投稿・resolve・承認・承認取消・Declineを使う場合は、トークンに
+pullrequest への write スコープが必要です**
 （閲覧だけなら read で十分）。
 
 環境変数の代わりに `~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml` に
@@ -246,13 +248,15 @@ Filesタブで引き続き確認できます。
 | `w`                                                    | 長い行の折返し切替（内蔵ビューア）                                                                                                                                                                                                                                                                   |
 | `c`                                                    | **コメント投稿** — diff 行:インラインコメント / `v` 選択中:**複数行コメント** / コメント上:返信（Comments タブの返信行では**入れ子返信**） / それ以外:PRコメント。投稿先はフッタに「c:返信→著者 L15」等で常に表示。エディタが popup で開き、保存して閉じると投稿（空なら中止）。**画面には自動反映** |
 | `C`                                                    | インラインコメント表示切替（内蔵ビューア）                                                                                                                                                                                                                                                           |
-| `x`                                                    | Comments タブ: 選択コメントを**削除**（フッタで `y` 確認。返信付きコメントは Bitbucket 仕様でソフト削除）                                                                                                                                                                                            |
+| `x`                                                    | Comments タブ: 選択コメントを**削除**（中央の確認画面で `y` を押す。返信付きコメントは Bitbucket 仕様でソフト削除）                                                                                                                                                                                 |
 | `s`                                                    | Comments タブ: スレッドを **resolve / 再オープン**（インラインスレッドのみ。返信行では**親スレッドに作用** — フッタに「s:親をresolve」と表示。解決済みは一覧に ✓・スレッドに [resolved] 表示）                                                                                                       |
+| `a` / `A` / `X`                                        | PR詳細: **承認 / 自分の承認取消 / Decline**（OPENのPRのみ。すべて `y` で確定、他キーで取消）                                                                                                                                                                                                          |
 | `D`                                                    | PR 全体の diff を diff ツールで開く                                                                                                                                                                                                                                                                  |
 | `r`                                                    | 再読込（キャッシュ破棄）                                                                                                                                                                                                                                                                             |
 | `o`                                                    | ブラウザで開く                                                                                                                                                                                                                                                                                       |
 | `y`                                                    | PR URL をクリップボードにコピー（一覧 / 詳細）                                                                                                                                                                                                                                                       |
 | `b`                                                    | source branch 名をクリップボードにコピー（一覧 / 詳細）                                                                                                                                                                                                                                              |
+| `?`                                                    | その画面のキーバインドを中央に表示。`j`/`k`・`Ctrl-d`/`Ctrl-u` でスクロール、`q`/`Esc`/`?` で閉じる                                                                                                                                                                                                  |
 | `q` / `Esc`                                            | 戻る / 終了                                                                                                                                                                                                                                                                                          |
 
 ## 設定（config.toml、全項目省略可）
@@ -317,7 +321,7 @@ outdated_fg = "yellow"
 
 ## 制限事項
 
-- approve・merge は行えません（`o` でブラウザへ）。
+- merge は行えません（`o` でブラウザへ）。DeclineしたPRの再オープンはブラウザで行ってください。
 - コメントの **like（いいね）は非対応**です。Bitbucket Cloud の公式 REST API に like の
   エンドポイントが存在せず、Web UI が使う内部 API は API トークン認証を受け付けないため
   実装できません（公式 API が提供されたら対応予定）。

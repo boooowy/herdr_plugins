@@ -137,11 +137,21 @@ func (c *bbClient) postJSON(rawURL string, payload, out any) error {
 // send performs one authenticated body-less request (DELETE/POST actions).
 // Like postJSON it never retries — these mutate server state.
 func (c *bbClient) send(method, rawURL string) error {
+	return c.sendResponse(method, rawURL, nil)
+}
+
+// sendResponse is send with optional JSON response decoding. PR approval
+// returns a participant and Decline returns the updated PR, while DELETE
+// actions commonly answer 204 with no body.
+func (c *bbClient) sendResponse(method, rawURL string, out any) error {
 	req, err := http.NewRequest(method, rawURL, nil)
 	if err != nil {
 		return err
 	}
 	req.SetBasicAuth(c.email, c.token)
+	if out != nil {
+		req.Header.Set("Accept", "application/json")
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -151,7 +161,40 @@ func (c *bbClient) send(method, rawURL string) error {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &httpError{Status: resp.StatusCode, URL: rawURL, Body: strings.TrimSpace(string(body))}
 	}
+	if out != nil && resp.StatusCode != http.StatusNoContent {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return fmt.Errorf("decode %s: %w", rawURL, err)
+		}
+	}
 	return nil
+}
+
+// approvePR records approval by the authenticated user.
+func (c *bbClient) approvePR(ws, repo string, prID int) (*Participant, error) {
+	var participant Participant
+	u := c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/approve", prID))
+	if err := c.sendResponse(http.MethodPost, u, &participant); err != nil {
+		return nil, err
+	}
+	return &participant, nil
+}
+
+// unapprovePR withdraws approval by the authenticated user.
+func (c *bbClient) unapprovePR(ws, repo string, prID int) error {
+	return c.send(http.MethodDelete,
+		c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/approve", prID)))
+}
+
+// declinePR closes an OPEN pull request. The partial response contains the
+// same fields as getPR so it can replace the detail and list snapshots.
+func (c *bbClient) declinePR(ws, repo string, prID int) (*PullRequest, error) {
+	var pr PullRequest
+	u := c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/decline?fields=%s",
+		prID, url.QueryEscape(detailPRFields)))
+	if err := c.sendResponse(http.MethodPost, u, &pr); err != nil {
+		return nil, err
+	}
+	return &pr, nil
 }
 
 // deleteComment removes a PR comment (204). A comment with visible replies

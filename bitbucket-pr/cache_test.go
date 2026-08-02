@@ -32,3 +32,24 @@ func TestPRCacheCorruptFile(t *testing.T) {
 		t.Error("corrupt cache must return nil")
 	}
 }
+
+func TestMutatePRCacheUpdatesAndRemovesMatchingPR(t *testing.T) {
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
+	prs := []PullRequest{{ID: 1, Title: "a"}, {ID: 2, Title: "b"}}
+	savePRCache("ws", "repo", "OPEN", prs)
+
+	mutatePRCache("ws", "repo", "OPEN", 1, func(pr *PullRequest) bool {
+		pr.Title = "updated"
+		return true
+	})
+	got := loadPRCache("ws", "repo", "OPEN")
+	if len(got) != 2 || got[0].Title != "updated" {
+		t.Fatalf("updated cache = %+v", got)
+	}
+
+	mutatePRCache("ws", "repo", "OPEN", 1, func(*PullRequest) bool { return false })
+	got = loadPRCache("ws", "repo", "OPEN")
+	if len(got) != 1 || got[0].ID != 2 {
+		t.Fatalf("removed cache = %+v", got)
+	}
+}

@@ -385,7 +385,7 @@ func (v *listView) handle(a *app, k Key) {
 			copyToClipboard(a, a.prs[r.Item.(int)].Source.Branch.Name)
 		}
 	case isKey(k, '?'):
-		a.push(helpView{ctx: "list"})
+		a.openHelp("list")
 	}
 	// Cursor within ~5 PRs (2 rows each) of the end: prefetch the next page.
 	if a.prsNext != "" && v.vp.Cursor >= len(v.vp.Rows)-10 {

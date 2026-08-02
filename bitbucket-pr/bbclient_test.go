@@ -355,6 +355,70 @@ func TestCommentActions(t *testing.T) {
 	}
 }
 
+func TestPullRequestActions(t *testing.T) {
+	var approveMethod, unapproveMethod, declineMethod string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/37/approve", func(w http.ResponseWriter, r *http.Request) {
+		u, p, ok := r.BasicAuth()
+		if !ok || u != "u@example.com" || p != "tok" {
+			t.Errorf("missing basic auth")
+		}
+		switch r.Method {
+		case http.MethodPost:
+			approveMethod = r.Method
+			fmt.Fprint(w, `{"user":{"account_id":"me","display_name":"Me"},"role":"PARTICIPANT","approved":true,"state":"approved"}`)
+		case http.MethodDelete:
+			unapproveMethod = r.Method
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/2.0/repositories/ws/repo/pullrequests/37/decline", func(w http.ResponseWriter, r *http.Request) {
+		declineMethod = r.Method
+		if got := r.URL.Query().Get("fields"); got != detailPRFields {
+			t.Errorf("decline fields = %q, want %q", got, detailPRFields)
+		}
+		fmt.Fprint(w, `{"id":37,"title":"closed","state":"DECLINED"}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := testClient(srv)
+
+	participant, err := c.approvePR("ws", "repo", 37)
+	if err != nil || participant.User.AccountID != "me" || !participant.Approved {
+		t.Fatalf("approve: participant=%+v err=%v", participant, err)
+	}
+	if err := c.unapprovePR("ws", "repo", 37); err != nil {
+		t.Fatalf("unapprove: %v", err)
+	}
+	pr, err := c.declinePR("ws", "repo", 37)
+	if err != nil || pr.State != "DECLINED" {
+		t.Fatalf("decline: pr=%+v err=%v", pr, err)
+	}
+	if approveMethod != http.MethodPost || unapproveMethod != http.MethodDelete || declineMethod != http.MethodPost {
+		t.Errorf("methods: approve=%s unapprove=%s decline=%s", approveMethod, unapproveMethod, declineMethod)
+	}
+}
+
+func TestPullRequestActionDoesNotRetry(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"error":{"message":"temporary"}}`)
+	}))
+	defer srv.Close()
+
+	_, err := testClient(srv).approvePR("ws", "repo", 37)
+	if err == nil {
+		t.Fatal("approve should fail")
+	}
+	if calls.Load() != 1 {
+		t.Errorf("mutation calls = %d, want 1", calls.Load())
+	}
+}
+
 func TestCommentActionErrorSurfaces(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

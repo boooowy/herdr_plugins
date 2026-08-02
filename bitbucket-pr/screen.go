@@ -76,6 +76,26 @@ func (s *Screen) AddAvatar(x, y, cols, rows int, rawURL, accountID string, badge
 
 func (s *Screen) Avatars() []AvatarCell { return s.avatars }
 
+// HideAvatars removes image placements that intersect r. Text painters can
+// overwrite cells, but Kitty images are submitted separately after the text
+// frame, so overlays must explicitly hide images beneath them.
+func (s *Screen) HideAvatars(r Rect) {
+	kept := s.avatars[:0]
+	for _, avatar := range s.avatars {
+		if rectsIntersect(r, Rect{X: avatar.X, Y: avatar.Y, W: avatar.Cols, H: avatar.Rows}) {
+			continue
+		}
+		kept = append(kept, avatar)
+	}
+	s.avatars = kept
+}
+
+func rectsIntersect(a, b Rect) bool {
+	return a.W > 0 && a.H > 0 && b.W > 0 && b.H > 0 &&
+		a.X < b.X+b.W && b.X < a.X+a.W &&
+		a.Y < b.Y+b.H && b.Y < a.Y+a.H
+}
+
 // Set places one rune. Wide runes claim the following cell as continuation.
 func (s *Screen) Set(x, y int, r rune, st StyleID) {
 	if x < 0 || y < 0 || x >= s.W || y >= s.H {

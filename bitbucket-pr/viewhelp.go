@@ -1,10 +1,13 @@
 package main
 
-// helpView is the `?` cheat sheet; any key returns. ctx selects which
-// screen's keys to show ("list" | "detail" | "diff") — a combined table
-// left users guessing where each key works.
-type helpView struct {
-	ctx string
+// helpOverlay is the `?` cheat sheet drawn above the current view. Keeping it
+// out of the navigation stack preserves the screen beneath it and lets q/Esc
+// close the help without navigating backward.
+type helpOverlay struct {
+	ctx      string
+	top      int
+	pageRows int
+	maxTop   int
 }
 
 type helpLine struct {
@@ -37,6 +40,7 @@ var helpByCtx = map[string]struct {
 		{"c", "コメント投稿 (Comments のコメント上ではそこへ返信 — 返信行なら入れ子返信)"},
 		{"x", "Comments: 選択コメントを削除 (y で確定)"},
 		{"s", "Comments: スレッドを resolve / 再オープン (インラインのみ)"},
+		{"a / A / X", "PRを承認 / 自分の承認取消 / Decline (yで確定、OPENのみ)"},
 		{"D", "PR全体のdiffをdiffツールで開く"},
 		{"y", "PR URL をコピー"},
 		{"b", "source branch 名をコピー"},
@@ -65,27 +69,77 @@ var helpCommon = []helpLine{
 	{"q / Esc", "戻る / 終了"},
 }
 
-func (h helpView) render(a *app, s *Screen) {
-	sec := helpByCtx[h.ctx]
-	s.WriteString(1, 0, "bitbucket-pr — キーバインド ("+sec.title+")", styleTitle, a.w)
-	paintSeparator(s, 1, a.w)
-	y := 2
-	write := func(l helpLine) {
-		s.WriteString(2, y, padRight(l.key, 24), styleMeta, a.w)
-		s.WriteString(27, y, l.desc, styleNone, a.w)
-		y++
+func (a *app) openHelp(ctx string) {
+	a.help = &helpOverlay{ctx: ctx}
+}
+
+func (h *helpOverlay) handle(a *app, k Key) {
+	switch {
+	case isKey(k, 'q') || isKey(k, '?') || k.Kind == KeyEsc:
+		a.help = nil
+	case isKey(k, 'j') || k.Kind == KeyDown:
+		h.top++
+	case isKey(k, 'k') || k.Kind == KeyUp:
+		h.top--
+	case k.Kind == KeyCtrl && k.R == 'd':
+		h.top += max(1, h.pageRows/2)
+	case k.Kind == KeyCtrl && k.R == 'u':
+		h.top -= max(1, h.pageRows/2)
 	}
-	for _, l := range sec.lines {
-		write(l)
+	if h.top < 0 {
+		h.top = 0
 	}
-	y++
-	s.WriteString(2, y, "共通", styleDim, a.w)
-	y++
-	for _, l := range helpCommon {
-		write(l)
+	if h.top > h.maxTop {
+		h.top = h.maxTop
 	}
 }
 
-func (helpView) handle(a *app, k Key) { a.pop() }
+func paintHelpOverlay(a *app, s *Screen) {
+	h := a.help
+	sec := helpByCtx[h.ctx]
+	const preferredWidth = 84
+	contentWidth := modalContentWidth(s.W, preferredWidth)
+	lines := helpModalLines(sec.lines, contentWidth)
+	lines = append(lines, modalLine{NoWrap: true})
+	lines = append(lines, modalLine{Spans: []Span{{Text: "共通", Style: styleDim}}, NoWrap: true})
+	lines = append(lines, helpModalLines(helpCommon, contentWidth)...)
+	result := paintModal(s, modalSpec{
+		Title:          "キーバインド — " + sec.title,
+		Lines:          lines,
+		Footer:         modalLine{Spans: []Span{{Text: "j/k・Ctrl-d/u スクロール   q/Esc/? 閉じる", Style: styleDim}}, Center: true},
+		PreferredWidth: preferredWidth,
+		Top:            h.top,
+	})
+	h.top = result.Top
+	h.pageRows = result.PageRows
+	h.maxTop = max(0, result.ContentRows-result.PageRows)
+}
 
-func (helpView) footer(a *app) string { return "任意のキーで戻る" }
+func helpModalLines(entries []helpLine, width int) []modalLine {
+	var out []modalLine
+	if width >= 52 {
+		const keyWidth = 24
+		descWidth := max(1, width-keyWidth)
+		for _, entry := range entries {
+			parts := wrapText(entry.desc, descWidth)
+			for i, part := range parts {
+				key := ""
+				if i == 0 {
+					key = entry.key
+				}
+				out = append(out, modalLine{Spans: []Span{
+					{Text: padRight(key, keyWidth), Style: styleMeta},
+					{Text: part, Style: styleNone},
+				}, NoWrap: true})
+			}
+		}
+		return out
+	}
+	for _, entry := range entries {
+		out = append(out, modalLine{Spans: []Span{{Text: entry.key, Style: styleMeta}}, NoWrap: true})
+		for _, part := range wrapText(entry.desc, max(1, width-2)) {
+			out = append(out, modalLine{Spans: []Span{{Text: "  " + part, Style: styleNone}}, NoWrap: true})
+		}
+	}
+	return out
+}
