@@ -61,3 +61,37 @@ func TestListCursorKeepsBothItemRowsVisible(t *testing.T) {
 		t.Fatalf("top = %d, want 2 so both selected rows are visible", v.vp.Top)
 	}
 }
+
+func TestListCommentCountFollowsUpdatedAtFixedColumn(t *testing.T) {
+	a := &app{w: 140, h: 10}
+	a.prs = []PullRequest{
+		{ID: 1, Title: "short", CommentCount: 0},
+		{ID: 2, Title: strings.Repeat("long title ", 10), CommentCount: 7},
+		{ID: 3, Title: "日本語タイトル", CommentCount: 1234},
+	}
+	for i := range a.prs {
+		a.prs[i].Author.DisplayName = strings.Repeat("author", i+1)
+	}
+
+	v := &listView{}
+	v.rebuild(a)
+
+	wantText := []string{"", "💬 7", "💬 1234"}
+	wantCol := -1
+	for i := range a.prs {
+		row := v.vp.Rows[i*2]
+		comment := row.Spans[len(row.Spans)-1]
+		if got := strings.TrimSpace(comment.Text); got != wantText[i] {
+			t.Errorf("PR %d comment = %q, want %q", i, got, wantText[i])
+		}
+		if got := displayWidth(comment.Text); got != listCommentGap+listCommentWidth {
+			t.Errorf("PR %d comment column width = %d, want %d", i, got, listCommentGap+listCommentWidth)
+		}
+		col := spansWidth(row.Spans[:len(row.Spans)-1]) + listCommentGap
+		if wantCol < 0 {
+			wantCol = col
+		} else if col != wantCol {
+			t.Errorf("PR %d comment column = %d, want %d", i, col, wantCol)
+		}
+	}
+}
