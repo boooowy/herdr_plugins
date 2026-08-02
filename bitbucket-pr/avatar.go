@@ -913,12 +913,14 @@ func drawApprovedBadge(canvas *image.NRGBA, bounds image.Rectangle) {
 	if bounds.Dy() < side {
 		side = bounds.Dy()
 	}
-	radius := side / 4
+	// Keep the badge subordinate to the avatar, but give the check enough area
+	// to remain legible at the common 18px cell height.
+	radius := side/4 + 2
 	if radius < 3 {
 		radius = 3
 	}
-	if radius > 7 {
-		radius = 7
+	if radius > 9 {
+		radius = 9
 	}
 	cx, cy := bounds.Max.X-radius, bounds.Max.Y-radius
 	drawBadgeCircle(canvas, bounds, cx, cy, radius, color.NRGBA{R: 15, G: 23, B: 42, A: 255})
