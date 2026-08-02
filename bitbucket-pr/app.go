@@ -107,6 +107,7 @@ func (a *app) avatarReady() <-chan struct{} {
 // main goroutine.
 func (a *app) fetch(label string, work func() (func(*app), error)) {
 	a.loading++
+	started := time.Now()
 	debugf("fetch: %s", label)
 	go func() {
 		apply, err := work()
@@ -114,9 +115,10 @@ func (a *app) fetch(label string, work func() (func(*app), error)) {
 			a.loading--
 			if err != nil {
 				a.status = err.Error()
-				debugf("fetch %s: %v", label, err)
+				debugf("fetch %s: error after %s: %v", label, time.Since(started).Round(time.Millisecond), err)
 				return
 			}
+			debugf("fetch %s: done in %s", label, time.Since(started).Round(time.Millisecond))
 			apply(a)
 		}
 	}()
@@ -177,7 +179,7 @@ func runUI() {
 		a.push(newListView(a))
 		if ctx.PRID > 0 {
 			// Ctrl-clicked PR URL: go straight to the PR, list stays underneath.
-			a.push(newDetailView(a, ctx.PRID))
+			a.push(newDetailView(a, ctx.PRID, nil))
 		}
 	}
 

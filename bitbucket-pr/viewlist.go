@@ -356,7 +356,14 @@ func (v *listView) handle(a *app, k Key) {
 		v.vp.Scroll(-v.vp.H / 2)
 	case k.Kind == KeyEnter:
 		if r := v.vp.Current(); r != nil && r.Kind == RowPR {
-			a.push(newDetailView(a, a.prs[r.Item.(int)].ID))
+			// The list already has enough data for the detail header and
+			// reviewer summary. Pass a copy so the first detail frame does not
+			// wait for GET /pullrequests/{id}; the full response replaces it.
+			pr := a.prs[r.Item.(int)]
+			if pr.State == "" {
+				pr.State = a.prsState
+			}
+			a.push(newDetailView(a, pr.ID, &pr))
 		}
 	case isKey(k, 's') || isKey(k, 'l') || k.Kind == KeyTab || k.Kind == KeyRight ||
 		(k.Kind == KeyRune && k.R == '\t'):

@@ -322,6 +322,32 @@ const listPRFields = "next," +
 	"values.source.branch.name,values.destination.branch.name," +
 	"values.links.html.href"
 
+// detailPRFields keeps the PR-detail request focused on fields used by the
+// Overview header, reviewer list, actions, and Outline analysis. Bitbucket's
+// default object also carries rendered HTML and other metadata that the TUI
+// never reads.
+const detailPRFields = "id,title,state,comment_count,updated_on,summary.raw," +
+	"author.display_name,author.nickname,author.uuid,author.account_id,author.links.avatar.href," +
+	"participants.role,participants.state,participants.approved," +
+	"participants.user.display_name,participants.user.nickname,participants.user.uuid," +
+	"participants.user.account_id,participants.user.links.avatar.href," +
+	"source.branch.name,source.commit.hash,destination.branch.name,destination.commit.hash," +
+	"links.html.href"
+
+// diffStatFields and commentFields retain `next` because both endpoints are
+// paginated and getAll follows the server-provided URL verbatim.
+const diffStatFields = "next,values.status,values.lines_added,values.lines_removed," +
+	"values.old.path,values.new.path"
+
+const commentFields = "next,values.id,values.created_on,values.updated_on,values.deleted,values.pending," +
+	"values.content.raw,values.parent.id," +
+	"values.inline.path,values.inline.from,values.inline.to,values.inline.start_from," +
+	"values.inline.start_to,values.inline.outdated," +
+	"values.user.display_name,values.user.nickname,values.user.uuid," +
+	"values.user.account_id,values.user.links.avatar.href," +
+	"values.resolution.created_on,values.resolution.user.display_name," +
+	"values.resolution.user.nickname,values.resolution.user.uuid,values.resolution.user.account_id"
+
 // listPRsFirstURL builds the first page of the repo's PR list filtered by
 // state (OPEN | MERGED | DECLINED | SUPERSEDED). Follow-up pages come from
 // the `next` link returned by listPRsPage.
@@ -348,7 +374,8 @@ func (c *bbClient) listPRs(ws, repo, state string) ([]PullRequest, error) {
 // getPR returns the full PR detail (participants included).
 func (c *bbClient) getPR(ws, repo string, id int) (*PullRequest, error) {
 	var pr PullRequest
-	if err := c.getJSON(c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d", id)), &pr); err != nil {
+	u := c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d?fields=%s", id, url.QueryEscape(detailPRFields)))
+	if err := c.getJSON(u, &pr); err != nil {
 		return nil, err
 	}
 	return &pr, nil
@@ -362,12 +389,14 @@ func (c *bbClient) diff(ws, repo string, id int) (string, error) {
 
 // diffStat returns the per-file change summary (paginated, behind a 302).
 func (c *bbClient) diffStat(ws, repo string, id int) ([]DiffStatEntry, error) {
-	u := c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/diffstat?pagelen=100", id))
+	u := c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/diffstat?pagelen=100&fields=%s",
+		id, url.QueryEscape(diffStatFields)))
 	return getAll[DiffStatEntry](c, u, 0)
 }
 
 // comments returns every comment on the PR (general + inline + replies).
 func (c *bbClient) comments(ws, repo string, id int) ([]Comment, error) {
-	u := c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/comments?pagelen=100", id))
+	u := c.repoURL(ws, repo, fmt.Sprintf("/pullrequests/%d/comments?pagelen=100&fields=%s",
+		id, url.QueryEscape(commentFields)))
 	return getAll[Comment](c, u, 0)
 }
