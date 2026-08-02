@@ -526,6 +526,42 @@ func TestComposeAvatarSceneDrawsApprovedBadgeOnlyWhenRequested(t *testing.T) {
 	}
 }
 
+func TestDrawApprovedBadgeIsReadableAtCommonAvatarSize(t *testing.T) {
+	bounds := image.Rect(0, 0, 18, 18)
+	canvas := image.NewNRGBA(bounds)
+	base := color.NRGBA{R: 180, G: 20, B: 20, A: 255}
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			canvas.SetNRGBA(x, y, base)
+		}
+	}
+	drawApprovedBadge(canvas, bounds)
+
+	changed := image.Rectangle{Min: bounds.Max, Max: bounds.Min}
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if canvas.NRGBAAt(x, y) == base {
+				continue
+			}
+			if x < changed.Min.X {
+				changed.Min.X = x
+			}
+			if y < changed.Min.Y {
+				changed.Min.Y = y
+			}
+			if x+1 > changed.Max.X {
+				changed.Max.X = x + 1
+			}
+			if y+1 > changed.Max.Y {
+				changed.Max.Y = y + 1
+			}
+		}
+	}
+	if want := image.Rect(6, 6, 18, 18); changed != want {
+		t.Fatalf("approved badge bounds = %v, want %v", changed, want)
+	}
+}
+
 func TestAvatarSceneKeyIncludesBadge(t *testing.T) {
 	cell := AvatarCell{URL: "avatar", AccountID: "account", X: 1, Y: 2, Cols: 2, Rows: 1}
 	plain := avatarSceneItemKey(cell, 7)
