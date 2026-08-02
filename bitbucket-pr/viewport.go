@@ -47,6 +47,9 @@ type Row struct {
 	Item       any
 	Selectable bool
 	Avatars    []RowAvatar
+	// CursorRows groups this row with the following rows for cursor painting.
+	// Zero keeps the default one-row inverse cursor.
+	CursorRows int
 }
 
 // row is a convenience constructor.
@@ -171,8 +174,21 @@ func (v *Viewport) EnsureVisible() {
 	if v.Cursor < v.Top {
 		v.Top = v.Cursor
 	}
-	if v.Cursor >= v.Top+v.H {
-		v.Top = v.Cursor - v.H + 1
+	cursorRows := 1
+	if v.Cursor < len(v.Rows) && v.Rows[v.Cursor].CursorRows > cursorRows {
+		cursorRows = v.Rows[v.Cursor].CursorRows
+	}
+	cursorEnd := v.Cursor + cursorRows
+	if cursorEnd > len(v.Rows) {
+		cursorEnd = len(v.Rows)
+	}
+	if cursorEnd > v.Top+v.H {
+		v.Top = cursorEnd - v.H
+	}
+	// When the cursor group is taller than the viewport, keep its selectable
+	// first row visible instead of showing only the trailing context rows.
+	if v.Top > v.Cursor {
+		v.Top = v.Cursor
 	}
 	v.clampTop()
 }
@@ -215,8 +231,15 @@ func (v *Viewport) Paint(s *Screen, r Rect) {
 			}
 			s.AddAvatar(ax, ay, avatar.Cols, avatar.Rows, avatar.URL, avatar.AccountID, avatar.Badge)
 		}
-		if idx == v.Cursor {
+		if idx == v.Cursor && v.Rows[idx].CursorRows <= 1 {
 			s.StyleRow(r.Y+i, r.X, r.X+r.W, styleNone, styleCursor)
 		}
+	}
+	if v.Cursor >= 0 && v.Cursor < len(v.Rows) && v.Rows[v.Cursor].CursorRows > 1 {
+		end := v.Cursor + v.Rows[v.Cursor].CursorRows
+		if end > len(v.Rows) {
+			end = len(v.Rows)
+		}
+		focusViewportRows(s, v, r, v.Cursor, end)
 	}
 }

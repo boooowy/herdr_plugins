@@ -18,6 +18,7 @@ const (
 	listRoleWidth       = 3
 	listAuthorNameWidth = 16
 	listUpdatedWidth    = 10
+	listItemDivider     = "  ────  "
 )
 
 // listView is the PR list: one selectable row per PR plus a muted meta row
@@ -153,6 +154,7 @@ func (v *listView) rebuild(a *app) {
 		spans = append(spans, Span{"  " + updated, styleDim})
 		prRow := row(RowPR, i, true, spans...)
 		prRow.Avatars = avatars
+		prRow.CursorRows = 2
 		rows = append(rows, prRow)
 		rows = append(rows, listMetaRow(a, pr))
 	}
@@ -205,7 +207,7 @@ func listMetaRow(a *app, pr *PullRequest) Row {
 	titleWidth := listTitleWidth(a)
 	if !a.avatarsEnabled() {
 		return textRow(
-			Span{strings.Repeat(" ", listIDWidth), styleNone},
+			Span{listItemDivider, styleDim},
 			Span{padRight(truncateWidth(branch, titleWidth), titleWidth), styleDim},
 		)
 	}
@@ -223,7 +225,7 @@ func listMetaRow(a *app, pr *PullRequest) Row {
 	}
 
 	spans := []Span{
-		{strings.Repeat(" ", listIDWidth), styleNone},
+		{listItemDivider, styleDim},
 		{padRight(truncateWidth(branch, titleWidth), titleWidth), styleDim},
 		{strings.Repeat(" ", listCommentWidth), styleDim},
 		{"R: ", styleDim},
