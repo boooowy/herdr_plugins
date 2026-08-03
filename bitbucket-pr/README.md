@@ -52,10 +52,10 @@ Review Outline（詳細の `2:Outline`）:
  1:Overview   2:Outline   3:Files (8)   4:Comments (4)
 ──────────────────────────────────────────────────────────────────────────────
  5 changed symbols (tests:2) in 3/3 files  │ method NewRouteCache  signature_changed
- ! v internal/cache  chg:3 api:2 fan-in:8  │ ! contract change + fan-in:5
-     v route_cache.go  chg:2 api:1          │
-       ~ function NewRouteCache api fan-in:5│ Signature
-         function loadEntry                 │ - func NewRouteCache(r *redis.Client)
+ ! v internal/cache  chg:3 api:2 smell:1   │ ! contract change + fan-in:5
+     v route_cache.go  chg:2 api:1 smell:1  │ ! body bloat: 20 → 64 lines (+44)
+       ~ fn NewRouteCache api fan-in:5 bloat:+44│ Signature
+         fn loadEntry                       │ - func NewRouteCache(r *redis.Client)
        > 2 tests                            │ + func NewRouteCache(r *redis.Client, ttl time.Duration)
    v cmd  chg:2 api:1                       │
                                            │ Used by
@@ -70,6 +70,18 @@ Outline は Tree-sitter で変更シンボルと1-hopの caller/callee を抽出
 高 fan-in、大きなファイルを先に確認しやすくする**注意マップ**です。解析結果はコードの正しさや
 影響範囲の完全性を保証するものではありません。テストシンボルはファイルごとに初期状態で折り畳み、
 広い画面では右側にシグネチャ・参照元/先・関連 hunk を表示します。
+
+コードスメルバッジ（AI が書いた PR に頻出する設計上の引っかかりの先出し）:
+
+- `god` — caller が 5 箇所以上かつ 3 ディレクトリ以上に散っている「神ヘルパー」。
+  責務の境界を跨いで依存されているシンボルは、正しさ以前に分割を検討する価値があります
+- `bloat:+N` — シグネチャは据え置きのまま body が +30 行以上かつ 1.5 倍以上に肥大した
+  既存の関数/メソッド
+- `big:N` — 新規追加された 80 行以上の関数/メソッド（新規ファイルの巨大関数も対象）
+
+ファイル/ディレクトリ行には配下のスメル数が `smell:N` として集約され、`/god` `/bloat` `/big`
+で該当シンボルだけに絞り込めます。型定義（struct/class 等）とテストコードは、正当に大きく
+なりやすいためスメル判定の対象外です。判定根拠は右側プレビューに表示されます。
 
 diff ビュー（hunk 単位・インラインコメント埋め込み）:
 
