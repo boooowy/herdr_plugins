@@ -168,32 +168,59 @@ func (s outlineSymbol) bigAddedLines() (lines int, ok bool) {
 	return lines, lines >= outlineBigAddedLines
 }
 
-// smellCount is at most 2: bloat and big are mutually exclusive by Change.
-func (s outlineSymbol) smellCount() int {
-	n := 0
+// smellMask identifies which smells a symbol (or its file/directory
+// subtree) carries; bloat and big are mutually exclusive by Change, so a
+// single symbol carries at most two bits.
+type smellMask uint8
+
+const (
+	smellGod   smellMask = 1 << iota // 呼出集中
+	smellBloat                       // 肥大
+	smellBig                         // 巨大
+)
+
+func (s outlineSymbol) smells() smellMask {
+	var m smellMask
 	if s.godHelper() {
-		n++
+		m |= smellGod
 	}
 	if _, ok := s.bloatGrowth(); ok {
-		n++
+		m |= smellBloat
 	}
 	if _, ok := s.bigAddedLines(); ok {
-		n++
+		m |= smellBig
 	}
-	return n
+	return m
 }
 
-// smellQueryText feeds the "/" filter so smelly symbols can be isolated.
+// smellChipLabels returns the aggregate chip labels (no counts) in a fixed
+// order matching the per-symbol chip order.
+func smellChipLabels(m smellMask) []string {
+	var labels []string
+	if m&smellGod != 0 {
+		labels = append(labels, "呼出集中")
+	}
+	if m&smellBloat != 0 {
+		labels = append(labels, "肥大")
+	}
+	if m&smellBig != 0 {
+		labels = append(labels, "巨大")
+	}
+	return labels
+}
+
+// smellQueryText feeds the "/" filter. Both the Japanese chip labels and
+// English aliases are listed so /肥大 and /bloat find the same symbols.
 func (s outlineSymbol) smellQueryText() string {
 	var parts []string
 	if s.godHelper() {
-		parts = append(parts, "god-helper")
+		parts = append(parts, "呼出集中 god-helper")
 	}
 	if _, ok := s.bloatGrowth(); ok {
-		parts = append(parts, "bloat")
+		parts = append(parts, "肥大 bloat")
 	}
 	if _, ok := s.bigAddedLines(); ok {
-		parts = append(parts, "big")
+		parts = append(parts, "巨大 big")
 	}
 	return strings.Join(parts, " ")
 }
@@ -222,12 +249,12 @@ func (f outlineFile) apiCount() int {
 	return n
 }
 
-func (f outlineFile) smellCount() int {
-	n := 0
+func (f outlineFile) smells() smellMask {
+	var m smellMask
 	for _, symbol := range f.Symbols {
-		n += symbol.smellCount()
+		m |= symbol.smells()
 	}
-	return n
+	return m
 }
 
 func (f outlineFile) fanIn() int {

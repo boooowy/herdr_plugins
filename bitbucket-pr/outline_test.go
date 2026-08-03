@@ -108,23 +108,29 @@ func TestOutlineBigAddedLines(t *testing.T) {
 	}
 }
 
-func TestOutlineSmellCountAndQueryText(t *testing.T) {
+func TestOutlineSmellMaskAndQueryText(t *testing.T) {
 	s := outlineSymbol{
 		Kind: "fn", Change: outlineBodyOnly,
 		StartLine: 1, EndLine: 60, OldStartLine: 1, OldEndLine: 20,
 		Callers: smellCallers([]string{"api", "api", "batch", "batch", "cli"}, 0),
 	}
-	if got := s.smellCount(); got != 2 {
-		t.Errorf("smellCount() = %d, want 2", got)
+	if got := s.smells(); got != smellGod|smellBloat {
+		t.Errorf("smells() = %b, want god|bloat", got)
 	}
-	if got := s.smellQueryText(); got != "god-helper bloat" {
+	if got := s.smellQueryText(); got != "呼出集中 god-helper 肥大 bloat" {
 		t.Errorf("smellQueryText() = %q", got)
 	}
 	file := outlineFile{Symbols: []outlineSymbol{s, {Kind: "fn", Change: outlineAdded, StartLine: 1, EndLine: 90}}}
-	if got := file.smellCount(); got != 3 {
-		t.Errorf("file smellCount() = %d, want 3", got)
+	if got := file.smells(); got != smellGod|smellBloat|smellBig {
+		t.Errorf("file smells() = %b, want god|bloat|big", got)
+	}
+	if got := smellChipLabels(file.smells()); len(got) != 3 || got[0] != "呼出集中" || got[1] != "肥大" || got[2] != "巨大" {
+		t.Errorf("smellChipLabels() = %v", got)
 	}
 	if got := (outlineSymbol{Kind: "fn", Change: outlineBodyOnly}).smellQueryText(); got != "" {
 		t.Errorf("clean symbol smellQueryText() = %q, want empty", got)
+	}
+	if got := smellChipLabels(0); got != nil {
+		t.Errorf("smellChipLabels(0) = %v, want nil", got)
 	}
 }

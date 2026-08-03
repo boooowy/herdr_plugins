@@ -35,6 +35,7 @@ const (
 	styleSynComment          // syntax: comments
 	styleSynNumber           // syntax: numeric literals
 	styleSynFunc             // syntax: function/class names
+	styleSmellBadge          // outline smell chips (filled badge look)
 )
 
 // styleOnCommentBg is the StyleID offset for "same style, on the comment
@@ -110,6 +111,7 @@ func sgrTable(cfg Config) map[StyleID]string {
 		styleSynComment:  codeBg + "\x1b[3;90m",
 		styleSynNumber:   codeBg + "\x1b[38;5;215m",
 		styleSynFunc:     codeBg + "\x1b[34m",
+		styleSmellBadge:  "\x1b[43;30m",
 	}
 	// Comment-area and focus variants: the area bg comes first so a style's
 	// own bg (code blocks) still wins where present. Focus replaces the
