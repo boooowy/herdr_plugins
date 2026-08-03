@@ -19,7 +19,16 @@ type Config struct {
 
 	DefaultWorkspace string            `toml:"default_workspace"` // fallback: $BITBUCKET_WORKSPACE
 	DefaultRepo      string            `toml:"default_repo"`
-	DefaultState     string            `toml:"default_state"`    // initial PR list filter
+	DefaultState     string            `toml:"default_state"` // initial PR list filter
+
+	// Repo picker: where existing checkouts live (scanned to mark repos as
+	// local) and how the picker clones missing ones. clone_dir falls back to
+	// the first repo_roots entry.
+	RepoRoots     []string `toml:"repo_roots"`
+	CloneDir      string   `toml:"clone_dir"`
+	CloneProtocol string   `toml:"clone_protocol"` // ssh | https
+	CloneArgs     []string `toml:"clone_args"`     // extra git clone flags, e.g. ["--filter=blob:none"]
+
 	Placement        string            `toml:"placement"`        // tab | split | zoomed | overlay
 	ListTabTitle     string            `toml:"list_tab_title"`   // viewer tab label: {repo} {workspace}
 	ShowComments     bool              `toml:"show_comments"`    // inline comments in the diff view
@@ -59,6 +68,7 @@ type Config struct {
 func defaultConfig() Config {
 	return Config{
 		DefaultState:      "OPEN",
+		CloneProtocol:     "ssh",
 		Placement:         "tab",
 		ListTabTitle:      "PRs {repo}",
 		ShowComments:      true,
@@ -102,6 +112,15 @@ func loadConfig() Config {
 		return bad
 	}
 	cfg.AvatarOverrides = normalizeAvatarOverridePaths(cfg.AvatarOverrides, dir)
+	cfg.RepoRoots = normalizeDirPaths(cfg.RepoRoots)
+	if roots := normalizeDirPaths([]string{cfg.CloneDir}); len(roots) > 0 {
+		cfg.CloneDir = roots[0]
+	} else {
+		cfg.CloneDir = ""
+	}
+	if cfg.CloneProtocol != "https" {
+		cfg.CloneProtocol = defaultConfig().CloneProtocol
+	}
 	switch cfg.Placement {
 	case "tab", "split", "zoomed", "overlay":
 	default:
@@ -173,6 +192,41 @@ func normalizeAvatarOverridePaths(overrides map[string]string, configDir string)
 		return nil
 	}
 	return normalized
+}
+
+// normalizeDirPaths expands ~ and cleans each directory path, dropping
+// blanks. Relative paths are kept relative to the user's home (a plugin
+// process cwd is the plugin directory, which is never what a user means).
+func normalizeDirPaths(paths []string) []string {
+	home, _ := os.UserHomeDir()
+	var out []string
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if p == "~" {
+			p = home
+		} else if strings.HasPrefix(p, "~/") {
+			p = filepath.Join(home, p[2:])
+		} else if !filepath.IsAbs(p) {
+			p = filepath.Join(home, p)
+		}
+		out = append(out, filepath.Clean(p))
+	}
+	return out
+}
+
+// cloneDir resolves where the picker clones into: clone_dir, falling back
+// to the first repo_roots entry. "" means cloning is not configured.
+func (c Config) cloneDir() string {
+	if c.CloneDir != "" {
+		return c.CloneDir
+	}
+	if len(c.RepoRoots) > 0 {
+		return c.RepoRoots[0]
+	}
+	return ""
 }
 
 // credentials resolves the Bitbucket auth pair: config wins, then the

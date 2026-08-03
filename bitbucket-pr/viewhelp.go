@@ -18,6 +18,13 @@ var helpByCtx = map[string]struct {
 	title string
 	lines []helpLine
 }{
+	"picker": {"リポジトリ選択", []helpLine{
+		{"j / k / ↑ / ↓", "移動"},
+		{"Enter", "選択したリポジトリのPR一覧を開く"},
+		{"/", "絞り込み (リポジトリ名/説明、Esc で解除)"},
+		{"C", "ローカルにclone (y で確定。既存checkoutがあれば関連付けのみ)"},
+		{"y", "clone URL をコピー"},
+	}},
 	"list": {"PR一覧", []helpLine{
 		{"j / k / ↑ / ↓", "移動"},
 		{"Enter", "PR詳細を開く"},

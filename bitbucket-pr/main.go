@@ -13,7 +13,7 @@ import (
 	"os"
 )
 
-const version = "0.22.0"
+const version = "0.23.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -21,7 +21,7 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "action":
-		runAction()
+		runAction(os.Args[2:])
 	case "ui":
 		runUI()
 	case "difftool-ui":

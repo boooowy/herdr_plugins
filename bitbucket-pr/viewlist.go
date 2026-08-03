@@ -35,7 +35,12 @@ type listView struct {
 
 func newListView(a *app) *listView {
 	v := &listView{}
-	a.prsState = a.cfg.DefaultState
+	if a.prs == nil {
+		// Keep the state filter matching already-loaded data when the picker
+		// re-enters the same repo; a fresh (or reset) repo starts at the
+		// configured default.
+		a.prsState = a.cfg.DefaultState
+	}
 	v.load(a, false)
 	return v
 }

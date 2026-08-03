@@ -10,6 +10,7 @@ type RowKind int
 const (
 	RowText          RowKind = iota // plain content (description, separators)
 	RowPR                           // one PR in the list (Item: int index)
+	RowRepo                         // one repository in the picker (Item: int index)
 	RowFile                         // one file in the diffstat (Item: int index)
 	RowHunk                         // a hunk header (Item: hunkRef)
 	RowDiffLine                     // one diff line (Item: hunkRef)

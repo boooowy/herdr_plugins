@@ -60,7 +60,21 @@ func (v *detailView) ensureOutline(a *app, d *prDetail) {
 	}
 	d.outlineStarted = true
 	if a.ctx.RepoDir == "" {
-		d.outlineErr = "ローカルcheckoutが関連付けられていません。対象リポジトリ内のペインからPRを開いてください。"
+		// The checkout index may know this repo even though the launch pane
+		// did not (URL click, default_repo, picker): associate it silently
+		// after confirming its origin still matches.
+		key := repoDirKey(a.ctx.Workspace, a.ctx.Repo)
+		if dir := a.localDirs[key]; dir != "" {
+			if ws, repo, err := repoFromDir(dir); err == nil && ws == a.ctx.Workspace && repo == a.ctx.Repo {
+				a.ctx.RepoDir = dir
+			} else {
+				forgetRepoDir(a.ctx.Workspace, a.ctx.Repo)
+				delete(a.localDirs, key)
+			}
+		}
+	}
+	if a.ctx.RepoDir == "" {
+		d.outlineErr = "ローカルcheckoutが関連付けられていません。C でcloneするか、対象リポジトリ内のペインからPRを開き直してください。"
 		return
 	}
 	sourceHash := d.pr.Source.Commit.Hash
@@ -97,6 +111,76 @@ func (v *detailView) ensureOutline(a *app, d *prDetail) {
 			v.rebuild(a)
 		}, nil
 	})
+}
+
+// beginOutlineClone opens the y/n confirmation for cloning the current repo
+// so Outline can run. Reached from the Outline tab's "no local checkout"
+// state (ensureOutline already consumed any known checkout in the index).
+func (v *detailView) beginOutlineClone(a *app) {
+	if v.pendingAction.kind != detailActionNone {
+		return
+	}
+	ws, repo := a.ctx.Workspace, a.ctx.Repo
+	dest := cloneDestFor(a.cfg, repo)
+	if dest == "" {
+		a.status = "clone先が未設定です。config.toml の repo_roots か clone_dir を設定してください"
+		return
+	}
+	if a.cloneInFlight[ws+"/"+repo] {
+		a.status = "clone実行中です: " + ws + "/" + repo
+		return
+	}
+	v.pendingAction = pendingDetailAction{
+		kind:   detailActionClone,
+		prompt: fmt.Sprintf("%s/%s を %s にcloneしますか？", ws, repo, shortenHome(dest)),
+	}
+}
+
+// runOutlineClone resolves the repository's clone links (from the picker's
+// list when present, otherwise one API call) and clones it, then reruns the
+// Outline analysis against the fresh checkout.
+func (v *detailView) runOutlineClone(a *app) {
+	ws, repo := a.ctx.Workspace, a.ctx.Repo
+	for i := range a.repos {
+		if a.repos[i].Slug == repo {
+			v.cloneAndReanalyze(a, a.repos[i])
+			return
+		}
+	}
+	a.fetch("repo "+repo, func() (func(*app), error) {
+		r, err := a.client.getRepo(ws, repo)
+		return func(a *app) {
+			if err != nil {
+				a.status = "リポジトリ情報の取得に失敗: " + err.Error()
+				return
+			}
+			v.cloneAndReanalyze(a, *r)
+		}, nil
+	})
+}
+
+func (v *detailView) cloneAndReanalyze(a *app, r Repository) {
+	if msg := cloneBlocked(a, &r); msg != "" {
+		a.status = msg
+		return
+	}
+	startClone(a, r, func(a *app, dir string) {
+		if dir == "" {
+			return
+		}
+		a.ctx.RepoDir = dir
+		v.retryOutline(a)
+	})
+}
+
+// retryOutline drops the failed analysis state and reruns ensureOutline.
+func (v *detailView) retryOutline(a *app) {
+	d := a.detailFor(v.prID)
+	d.outlineStarted, d.outlineLoading = false, false
+	d.outlineErr = ""
+	d.outline = nil
+	v.ensureOutline(a, d)
+	v.rebuild(a)
 }
 
 func outlineUserError(repoDir, sourceHash, destinationHash string, err error) string {
@@ -731,6 +815,9 @@ func (v *detailView) handleOutlineKey(a *app, k Key) bool {
 		return true
 	}
 	switch {
+	case isKey(k, 'C') && a.ctx.RepoDir == "":
+		v.beginOutlineClone(a)
+		return true
 	case isKey(k, 'g'):
 		v.outline.pendingG = true
 		a.status = "Outline: gg=先頭  gd=callee  gr=caller"

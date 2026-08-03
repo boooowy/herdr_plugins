@@ -47,6 +47,45 @@ func savePRCache(ws, repo, state string, prs []PullRequest) {
 	}
 }
 
+// Repository-list disk cache: the last fetched first page per workspace,
+// painted instantly by the repo picker while the fresh page loads behind it
+// (same stale-while-revalidate as the PR list above).
+
+func repoCachePath(ws string) string {
+	return filepath.Join(stateDir(), "cache", "repos-"+ws+".json")
+}
+
+// loadRepoCache returns the cached first page, or nil when absent/unreadable.
+func loadRepoCache(ws string) []Repository {
+	data, err := os.ReadFile(repoCachePath(ws))
+	if err != nil {
+		return nil
+	}
+	var repos []Repository
+	if err := json.Unmarshal(data, &repos); err != nil {
+		debugf("cache: unmarshal %s: %v", repoCachePath(ws), err)
+		return nil
+	}
+	return repos
+}
+
+// saveRepoCache stores the first page for the next startup; failures only log.
+func saveRepoCache(ws string, repos []Repository) {
+	path := repoCachePath(ws)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		debugf("cache: mkdir: %v", err)
+		return
+	}
+	data, err := json.Marshal(repos)
+	if err != nil {
+		debugf("cache: marshal: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		debugf("cache: write: %v", err)
+	}
+}
+
 // mutatePRCache updates one PR in the cached first page. Returning false from
 // mutate removes it (used when an OPEN PR is declined). Missing entries are
 // left alone because their correct page position is unknown.

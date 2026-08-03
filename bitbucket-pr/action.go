@@ -17,24 +17,47 @@ const (
 	envRepo      = "BITBUCKET_PR_REPO"
 	envPRID      = "BITBUCKET_PR_PR_ID"
 	envRepoDir   = "BITBUCKET_PR_REPO_DIR"
+	envMode      = "BITBUCKET_PR_MODE" // "picker" starts at the repo picker
 )
 
 // runAction is the palette/keybinding/link-handler entrypoint. It runs
 // server-side (no terminal): resolve which repo (and optionally which PR) to
 // show, then ask herdr to open the viewer pane with that context in env.
-func runAction() {
+// args[0] == "picker" skips repo resolution and opens the repo picker.
+func runAction(args []string) {
 	client, err := newHerdrClient()
 	if err != nil {
 		errExit(err)
 	}
 	cfg := loadConfig()
+	picker := len(args) > 0 && args[0] == "picker"
 
 	var workspace, repo, repoDir string
 	prID := 0
 
-	if url := os.Getenv("HERDR_PLUGIN_CLICKED_URL"); url != "" {
+	switch {
+	case picker:
+		// The current pane's repo (when there is one) only picks the
+		// workspace; the user chooses the repository in the picker. Its
+		// checkout still feeds the index so the picker can mark it local.
+		local := resolveRepoContext(client, cfg)
+		if local.Dir != "" {
+			rememberRepoDir(local.Workspace, local.Repo, local.Dir)
+		}
+		workspace = local.Workspace
+		if workspace == "" {
+			workspace = cfg.workspaceFallback()
+		}
+		if workspace == "" {
+			client.notify("Bitbucket PR",
+				"workspaceを特定できません。config.toml の default_workspace を設定するか、bitbucket.org リポジトリ内のペインで実行してください。",
+				"none")
+			errExit("could not resolve workspace")
+		}
+	case os.Getenv("HERDR_PLUGIN_CLICKED_URL") != "":
 		// Ctrl-clicked PR URL: the most reliable context — everything is in
 		// the URL, no git remote needed.
+		url := os.Getenv("HERDR_PLUGIN_CLICKED_URL")
 		workspace, repo, prID, err = parsePRURL(url)
 		if err != nil {
 			client.notify("Bitbucket PR", "PR URLを解釈できません: "+url, "none")
@@ -46,10 +69,16 @@ func runAction() {
 		if local := resolveRepoContext(client, cfg); local.Workspace == workspace && local.Repo == repo {
 			repoDir = local.Dir
 		}
-	} else {
+	default:
 		local := resolveRepoContext(client, cfg)
 		workspace, repo, repoDir = local.Workspace, local.Repo, local.Dir
 		if workspace == "" || repo == "" {
+			// No repo under the pane and no default_repo — fall back to the
+			// picker when at least the workspace is known.
+			if ws := cfg.workspaceFallback(); ws != "" {
+				picker, workspace, repo, repoDir = true, ws, "", ""
+				break
+			}
 			client.notify("Bitbucket PR",
 				"リポジトリを特定できません。bitbucket.org リポジトリ内のペインで実行するか、config.toml の default_workspace/default_repo を設定してください。",
 				"none")
@@ -57,9 +86,20 @@ func runAction() {
 		}
 	}
 
+	if repoDir != "" {
+		// Teach the picker's checkout index in passing: normal launches are
+		// how most existing checkouts become known.
+		rememberRepoDir(workspace, repo, repoDir)
+	}
+
 	env := map[string]string{
 		envWorkspace: workspace,
-		envRepo:      repo,
+	}
+	if repo != "" {
+		env[envRepo] = repo
+	}
+	if picker {
+		env[envMode] = "picker"
 	}
 	if repoDir != "" {
 		env[envRepoDir] = repoDir
@@ -67,7 +107,7 @@ func runAction() {
 	if prID > 0 {
 		env[envPRID] = strconv.Itoa(prID)
 	}
-	debugf("action: open viewer %s/%s pr=%d placement=%s", workspace, repo, prID, cfg.Placement)
+	debugf("action: open viewer %s/%s pr=%d picker=%v placement=%s", workspace, repo, prID, picker, cfg.Placement)
 	pane, err := client.pluginPaneOpen(pluginID, "viewer", cfg.Placement, true, env, "", "")
 	if err != nil {
 		errExit("open viewer pane:", err)
@@ -76,11 +116,20 @@ func runAction() {
 	// placement — with split/overlay the pane lands in an existing tab whose
 	// label belongs to the user.
 	if cfg.Placement == "tab" && pane != nil && pane.TabID != "" {
-		title := strings.NewReplacer("{repo}", repo, "{workspace}", workspace).Replace(cfg.ListTabTitle)
+		title := "Bitbucket repos"
+		if repo != "" {
+			title = renderListTabTitle(cfg, workspace, repo)
+		}
 		if err := client.tabRename(pane.TabID, truncateWidth(title, 40)); err != nil {
 			debugf("action: tab rename: %v", err)
 		}
 	}
+}
+
+// renderListTabTitle expands the list_tab_title placeholders. Shared by the
+// action (initial open) and the picker (rename after selecting a repo).
+func renderListTabTitle(cfg Config, workspace, repo string) string {
+	return strings.NewReplacer("{repo}", repo, "{workspace}", workspace).Replace(cfg.ListTabTitle)
 }
 
 // resolveRepoContext derives {workspace, repo} from the pane the user
@@ -126,9 +175,10 @@ func resolveRepoContext(client *herdrClient, cfg Config) repoContext {
 // subcommand.
 type uiContext struct {
 	Workspace string
-	Repo      string
+	Repo      string // "" in picker mode until the user selects one
 	RepoDir   string
-	PRID      int // 0 = start at the PR list
+	PRID      int    // 0 = start at the PR list
+	Mode      string // "" | "picker"
 }
 
 func uiContextFromEnv() (uiContext, error) {
@@ -136,8 +186,9 @@ func uiContextFromEnv() (uiContext, error) {
 		Workspace: os.Getenv(envWorkspace),
 		Repo:      os.Getenv(envRepo),
 		RepoDir:   os.Getenv(envRepoDir),
+		Mode:      os.Getenv(envMode),
 	}
-	if ctx.Workspace == "" || ctx.Repo == "" {
+	if ctx.Workspace == "" || (ctx.Repo == "" && ctx.Mode != "picker") {
 		return ctx, fmt.Errorf("missing %s/%s; launch me via the action", envWorkspace, envRepo)
 	}
 	if s := os.Getenv(envPRID); s != "" {

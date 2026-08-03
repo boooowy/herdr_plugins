@@ -29,3 +29,27 @@ func TestUIContextFromEnvAllowsMissingRepoDir(t *testing.T) {
 		t.Fatalf("context = %#v", ctx)
 	}
 }
+
+func TestUIContextFromEnvPickerModeAllowsMissingRepo(t *testing.T) {
+	t.Setenv(envWorkspace, "workspace")
+	t.Setenv(envRepo, "")
+	t.Setenv(envRepoDir, "")
+	t.Setenv(envPRID, "")
+	t.Setenv(envMode, "picker")
+	ctx, err := uiContextFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Mode != "picker" || ctx.Repo != "" {
+		t.Fatalf("context = %#v", ctx)
+	}
+}
+
+func TestUIContextFromEnvRejectsMissingRepoWithoutPickerMode(t *testing.T) {
+	t.Setenv(envWorkspace, "workspace")
+	t.Setenv(envRepo, "")
+	t.Setenv(envMode, "")
+	if _, err := uiContextFromEnv(); err == nil {
+		t.Fatal("missing repo without picker mode must be an error")
+	}
+}

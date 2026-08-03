@@ -59,6 +59,16 @@ type app struct {
 	prsMoreLoading bool   // a loadMore page is in flight
 	detail         map[int]*prDetail
 
+	// Repo picker state (picker mode only; mirrors the PR-list block above).
+	repos            []Repository
+	reposNext        string
+	reposErr         string
+	reposGen         int
+	reposMoreLoading bool
+	localDirs        map[string]string // "ws/repo" → checkout path (repo-dirs.json + repo_roots scan)
+	cloneInFlight    map[string]bool   // full_name → a clone is running
+	viewerTabID      string            // viewer pane's own tab (renamed on repo selection); "" = unknown
+
 	difftoolPanes map[int]paneRef // PR id → its external diff tool tab
 
 	// pendingDifftool queues an Enter/D pressed while the PR diff was
@@ -125,6 +135,45 @@ func (a *app) fetch(label string, work func() (func(*app), error)) {
 	}()
 }
 
+// resetRepoState drops everything tied to the previous repository when the
+// picker switches to another one. The prsGen bump makes any in-flight
+// fetches for the old repo discard themselves on arrival. Old external diff
+// tabs stay open (they are the user's), only their tracking is dropped.
+func resetRepoState(a *app) {
+	a.prs, a.prsNext, a.prsErr = nil, "", ""
+	a.prsGen++
+	a.prsMoreLoading = false
+	a.detail = map[int]*prDetail{}
+	a.difftoolPanes = map[int]paneRef{}
+	a.pendingDifftool = nil
+}
+
+// renameViewerTab labels the viewer's own tab after a picker selection.
+// Only for tab placement, mirroring the action's rule: with split/overlay
+// the tab label belongs to the user. The tab id comes from pane.list via
+// the viewer's own HERDR_PANE_ID, resolved once ("-" caches a failure).
+func (a *app) renameViewerTab(title string) {
+	if a.cfg.Placement != "tab" {
+		return
+	}
+	if a.viewerTabID == "" {
+		a.viewerTabID = "-"
+		if id := os.Getenv("HERDR_PANE_ID"); id != "" {
+			if pane, err := a.herdr.paneByID(id); err == nil && pane.TabID != "" {
+				a.viewerTabID = pane.TabID
+			} else if err != nil {
+				debugf("ui: resolve viewer tab: %v", err)
+			}
+		}
+	}
+	if a.viewerTabID == "-" {
+		return
+	}
+	if err := a.herdr.tabRename(a.viewerTabID, truncateWidth(title, 40)); err != nil {
+		debugf("ui: tab rename: %v", err)
+	}
+}
+
 // detailFor returns (creating if needed) the cache slot for a PR id.
 func (a *app) detailFor(id int) *prDetail {
 	d, ok := a.detail[id]
@@ -169,6 +218,8 @@ func runUI() {
 		resultCh:      make(chan func(*app), 8),
 		detail:        map[int]*prDetail{},
 		difftoolPanes: map[int]paneRef{},
+		localDirs:     loadRepoDirIndex(),
+		cloneInFlight: map[string]bool{},
 	}
 	if cfg.loadErr != "" {
 		a.status = cfg.loadErr
@@ -177,10 +228,14 @@ func runUI() {
 		a.client = newBBClient(email, token, time.Duration(cfg.HTTPTimeoutSec)*time.Second)
 		timeout := time.Duration(cfg.HTTPTimeoutSec) * time.Second
 		a.avatars = newAvatarGraphics(herdr, a.client, newJiraClientFromEnv(timeout), cfg.ShowAvatars, cfg.AvatarOverrides)
-		a.push(newListView(a))
-		if ctx.PRID > 0 {
-			// Ctrl-clicked PR URL: go straight to the PR, list stays underneath.
-			a.push(newDetailView(a, ctx.PRID, nil))
+		if ctx.Mode == "picker" || ctx.Repo == "" {
+			a.push(newRepoPickerView(a))
+		} else {
+			a.push(newListView(a))
+			if ctx.PRID > 0 {
+				// Ctrl-clicked PR URL: go straight to the PR, list stays underneath.
+				a.push(newDetailView(a, ctx.PRID, nil))
+			}
 		}
 	}
 
