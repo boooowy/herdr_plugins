@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -323,6 +324,46 @@ func (v *detailView) fileRows(a *app, d *prDetail) []Row {
 	return rows
 }
 
+// hasNoCommentThreads is true only after comments have loaded and the PR has
+// no live general or inline threads. A nil slice still means "loading".
+func hasNoCommentThreads(d *prDetail) bool {
+	return d.comments != nil && commentThreadCount(d.comments) == 0
+}
+
+// showReviewGuide keeps the first-comment onboarding out of the viewport rows
+// so it cannot shift the selected file when the first comment is posted.
+func showReviewGuide(d *prDetail) bool {
+	return hasNoCommentThreads(d) && d.diffstat != nil && len(d.diffstat) > 0
+}
+
+func usesHunkDiffTool(cfg Config) bool {
+	return len(cfg.DiffTool) > 0 && strings.EqualFold(filepath.Base(cfg.DiffTool[0]), "hunk")
+}
+
+// reviewGuide describes a comment-capable path for the configured Files
+// action. Only hunk supports draft-note harvesting; other external tools must
+// direct comment authors to the built-in diff instead.
+func reviewGuide(cfg Config) string {
+	switch {
+	case cfg.FilesEnter == "builtin":
+		return " レビュー: ファイルを選択 → Enterで内蔵diff → cでコメント"
+	case usesHunkDiffTool(cfg):
+		return " レビュー: ファイルを選択 → Enterでhunk → + / cでコメント"
+	default:
+		return " レビュー: ファイルを選択 → vで内蔵diff → cでコメント"
+	}
+}
+
+func emptyCommentRows(query string) []Row {
+	if query != "" {
+		return []Row{textRow(Span{" (一致するコメントはありません)", styleDim})}
+	}
+	return []Row{
+		textRow(Span{" コメントはまだありません", styleDim}),
+		textRow(Span{" 3:Files からレビューを開始できます", styleMeta}),
+	}
+}
+
 func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	var rows []Row
 	now := time.Now()
@@ -341,11 +382,7 @@ func (v *detailView) commentRows(a *app, d *prDetail) []Row {
 	}
 	if len(general) == 0 && inlineTotal == 0 {
 		if a.loading == 0 {
-			msg := " (コメントはありません)"
-			if v.search[tabComments].query() != "" {
-				msg = " (一致するコメントはありません)"
-			}
-			rows = append(rows, textRow(Span{msg, styleDim}))
+			rows = append(rows, emptyCommentRows(v.search[tabComments].query())...)
 		}
 		return rows
 	}
@@ -439,11 +476,7 @@ func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 	}
 	if len(general) == 0 && inlineTotal == 0 {
 		if a.loading == 0 {
-			msg := " (コメントはありません)"
-			if v.search[tabComments].query() != "" {
-				msg = " (一致するコメントはありません)"
-			}
-			rows = append(rows, textRow(Span{msg, styleDim}))
+			rows = append(rows, emptyCommentRows(v.search[tabComments].query())...)
 		}
 		return rows
 	}
@@ -830,6 +863,11 @@ func (v *detailView) render(a *app, s *Screen) {
 	paintSeparator(s, 3, a.w)
 
 	rect := Rect{X: 0, Y: 4, W: a.w, H: a.h - 5}
+	if v.tab == tabFiles && showReviewGuide(d) && rect.H > 1 {
+		s.WriteString(1, rect.Y, truncateWidth(reviewGuide(a.cfg), a.w-2), styleMeta, a.w)
+		rect.Y++
+		rect.H--
+	}
 	if v.tab == tabOutline && outlineSplit(a.w) {
 		leftW := outlineMasterWidth(a.w)
 		left := Rect{X: 0, Y: rect.Y, W: leftW, H: rect.H}
@@ -1121,7 +1159,14 @@ func (v *detailView) footer(a *app) string {
 		}
 	}
 	if v.tab == tabFiles {
-		if a.cfg.FilesEnter == "builtin" {
+		d := a.detailFor(v.prID)
+		if showReviewGuide(d) && a.cfg.FilesEnter == "builtin" {
+			base += "Enter:レビュー開始  diff内 c:コメント  "
+		} else if showReviewGuide(d) && usesHunkDiffTool(a.cfg) {
+			base += "Enter:レビュー開始  hunk内 +/c:コメント  v:内蔵diff  "
+		} else if showReviewGuide(d) {
+			base += "Enter:diffツール  v:内蔵diff(c:コメント)  "
+		} else if a.cfg.FilesEnter == "builtin" {
 			base += "Enter:diff  "
 		} else {
 			base += "Enter:diffツール  v:内蔵diff  "
