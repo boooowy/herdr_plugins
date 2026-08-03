@@ -31,6 +31,7 @@ var helpByCtx = map[string]struct {
 		{"l / h  (→/←)", "タブ切替 (次 / 前)"},
 		{"j / k / ↑ / ↓", "移動 (Outline/Comments: 左リスト移動、右にプレビュー)"},
 		{"Enter", "Outline: 展開/diffへ / Files: diffツール / Comments: コードへ"},
+		{"hunk: + / c", "diff行にdraft noteを追加 (終了後にコメント投稿を確認)"},
 		{"gg / gd / gr", "Outline: 先頭 / 変更callee / 変更callerへ移動"},
 		{"Ctrl-o / Ctrl-i", "Outline: シンボル移動履歴を戻る / 進む"},
 		{"O", "Outline: 依存順 / アルファベット順を切替"},

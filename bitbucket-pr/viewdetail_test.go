@@ -454,6 +454,99 @@ func TestDetailRenderSplitSmoke(t *testing.T) {
 	}
 }
 
+func TestZeroCommentFilesGuideAdaptsToConfiguredViewer(t *testing.T) {
+	newPath := func(path string) *struct {
+		Path string `json:"path"`
+	} {
+		return &struct {
+			Path string `json:"path"`
+		}{Path: path}
+	}
+	cases := []struct {
+		name       string
+		cfg        Config
+		wantGuide  string
+		wantFooter string
+	}{
+		{"hunk", defaultConfig(), "Enterでhunk → + / cでコメント", "hunk内 +/c:コメント"},
+		{"builtin", func() Config { c := defaultConfig(); c.FilesEnter = "builtin"; return c }(), "Enterで内蔵diff → cでコメント", "diff内 c:コメント"},
+		{"other difftool", func() Config { c := defaultConfig(); c.DiffTool = []string{"delta"}; return c }(), "vで内蔵diff → cでコメント", "v:内蔵diff(c:コメント)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &prDetail{
+				pr:       &PullRequest{ID: 7, Title: "title"},
+				diffstat: []DiffStatEntry{{Status: "modified", New: newPath("a.go")}},
+				comments: []Comment{},
+			}
+			a := &app{w: 120, h: 20, cfg: tc.cfg, detail: map[int]*prDetail{7: d}}
+			v := &detailView{prID: 7, tab: tabFiles}
+			v.rebuild(a)
+
+			// The guide is painted above the viewport, so the cursor remains on
+			// the actual file and Enter keeps its existing semantics.
+			if r := v.vp[tabFiles].Current(); r == nil || r.Kind != RowFile || r.Item.(int) != 0 {
+				t.Fatalf("current row = %+v, want first file", r)
+			}
+			s := NewScreen(a.w, a.h)
+			v.render(a, s)
+			if line := screenRow(s, 4); !strings.Contains(line, tc.wantGuide) {
+				t.Errorf("guide = %q, want %q", line, tc.wantGuide)
+			}
+			if footer := v.footer(a); !strings.Contains(footer, tc.wantFooter) {
+				t.Errorf("footer = %q, want %q", footer, tc.wantFooter)
+			}
+		})
+	}
+}
+
+func TestFilesGuideOnlyAppearsForLoadedEmptyComments(t *testing.T) {
+	path := &struct {
+		Path string `json:"path"`
+	}{Path: "a.go"}
+	cases := []struct {
+		name     string
+		comments []Comment
+		diffstat []DiffStatEntry
+		want     bool
+	}{
+		{"loading comments", nil, []DiffStatEntry{{Status: "modified", New: path}}, false},
+		{"no comments", []Comment{}, []DiffStatEntry{{Status: "modified", New: path}}, true},
+		{"existing comment", masterFixture(), []DiffStatEntry{{Status: "modified", New: path}}, false},
+		{"no changed files", []Comment{}, []DiffStatEntry{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &prDetail{comments: tc.comments, diffstat: tc.diffstat}
+			if got := showReviewGuide(d); got != tc.want {
+				t.Errorf("showReviewGuide = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEmptyCommentsGuideAndFilteredEmptyState(t *testing.T) {
+	a := &app{w: 120}
+	d := &prDetail{comments: []Comment{}}
+	for _, rows := range [][]Row{
+		(&detailView{}).commentRows(a, d),
+		(&detailView{}).commentMasterRows(a, d),
+	} {
+		if len(rows) != 2 || !strings.Contains(spansText(rows[0]), "コメントはまだありません") ||
+			!strings.Contains(spansText(rows[1]), "3:Files からレビューを開始できます") {
+			t.Errorf("empty comment rows = %+v", rows)
+		}
+	}
+
+	v := &detailView{}
+	v.search[tabComments].buf = []byte("not-found")
+	rows := v.commentRows(a, &prDetail{comments: masterFixture()})
+	if len(rows) != 1 || !strings.Contains(spansText(rows[0]), "一致するコメントはありません") ||
+		strings.Contains(spansText(rows[0]), "3:Files") {
+		t.Errorf("filtered empty rows = %+v", rows)
+	}
+}
+
 // screenRow reads one rendered row back as a plain string.
 func screenRow(s *Screen, y int) string {
 	var b strings.Builder
