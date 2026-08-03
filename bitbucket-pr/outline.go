@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	outlineSchemaVersion = 2
+	outlineSchemaVersion = 3
 	outlineHighFanIn     = 3
 	outlineLargeFileLine = 800
 )
@@ -66,6 +66,7 @@ type outlineSymbol struct {
 	StartLine    int           `json:"start_line,omitempty"`
 	EndLine      int           `json:"end_line,omitempty"`
 	OldStartLine int           `json:"old_start_line,omitempty"`
+	OldEndLine   int           `json:"old_end_line,omitempty"`
 	Test         bool          `json:"test,omitempty"`
 	FanIn        int           `json:"fan_in,omitempty"`
 	Callers      []outlineRef  `json:"callers,omitempty"`

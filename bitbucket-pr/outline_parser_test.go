@@ -196,6 +196,9 @@ func Main() int { return Run(1, 0) }
 	if run.Change != outlineSignatureChanged {
 		t.Errorf("Run change = %s", run.Change)
 	}
+	if run.OldStartLine != 3 || run.OldEndLine != 3 {
+		t.Errorf("Run old span = %d-%d, want 3-3", run.OldStartLine, run.OldEndLine)
+	}
 	if run.FanIn != 1 || len(run.Callers) != 1 || run.Callers[0].Name != "Main" {
 		t.Errorf("Run callers/fan-in = %d %+v", run.FanIn, run.Callers)
 	}
@@ -223,6 +226,9 @@ func TestClassifyOutlineDeletionOnlyBodyChange(t *testing.T) {
 		map[string][]rawOutlineSymbol{"main.go": newSymbols}, map[string][]rawOutlineSymbol{"main.go": oldSymbols})
 	if len(file.Symbols) != 1 || file.Symbols[0].Name != "Run" || file.Symbols[0].Change != outlineBodyOnly {
 		t.Fatalf("deletion-only classification = %+v", file.Symbols)
+	}
+	if got := file.Symbols[0]; got.OldStartLine != 2 || got.OldEndLine != 5 {
+		t.Fatalf("paired old span = %d-%d, want 2-5", got.OldStartLine, got.OldEndLine)
 	}
 }
 
@@ -350,6 +356,9 @@ func Caller() { Gone() }
 	gone := resultSymbolNamed(result, "Gone")
 	if gone == nil || gone.Change != outlineRemoved {
 		t.Fatalf("removed symbol = %+v", gone)
+	}
+	if gone.OldStartLine != 2 || gone.OldEndLine != 2 {
+		t.Errorf("removed old span = %d-%d, want 2-2", gone.OldStartLine, gone.OldEndLine)
 	}
 	if gone.FanIn != 1 || len(gone.Callers) != 1 || gone.Callers[0].Name != "Caller" {
 		t.Fatalf("removed symbol callers = fan-in:%d callers:%+v", gone.FanIn, gone.Callers)
