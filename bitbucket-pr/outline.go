@@ -10,9 +10,19 @@ import (
 )
 
 const (
-	outlineSchemaVersion = 2
+	outlineSchemaVersion = 3
 	outlineHighFanIn     = 3
 	outlineLargeFileLine = 800
+
+	// Smell thresholds. god-helper must be a stronger signal than the "!"
+	// risky mark (fan-in >= 3), and 2 caller directories happen naturally
+	// with one adjacent package; 3 is the smallest evidence of cross-cutting
+	// use. Bloat requires both absolute and relative growth so that routine
+	// additions to already-long functions stay quiet.
+	outlineGodHelperFanIn = 5
+	outlineGodHelperDirs  = 3
+	outlineBloatMinGrowth = 30
+	outlineBigAddedLines  = 80
 )
 
 // outlineChange is the review weight of one changed symbol. The ASCII marks
@@ -66,6 +76,7 @@ type outlineSymbol struct {
 	StartLine    int           `json:"start_line,omitempty"`
 	EndLine      int           `json:"end_line,omitempty"`
 	OldStartLine int           `json:"old_start_line,omitempty"`
+	OldEndLine   int           `json:"old_end_line,omitempty"`
 	Test         bool          `json:"test,omitempty"`
 	FanIn        int           `json:"fan_in,omitempty"`
 	Callers      []outlineRef  `json:"callers,omitempty"`
@@ -78,6 +89,140 @@ func (s outlineSymbol) contractChanged() bool {
 
 func (s outlineSymbol) risky() bool {
 	return s.contractChanged() && s.FanIn >= outlineHighFanIn
+}
+
+// outlineCallableSymbolKind reports whether a kind has a body whose line
+// count is meaningful for size smells. Type-ish kinds (struct, class, enum,
+// config tables) legitimately grow long and would only produce noise.
+func outlineCallableSymbolKind(kind string) bool {
+	switch kind {
+	case "fn", "method", "ctor":
+		return true
+	}
+	return false
+}
+
+// godHelperStats counts unambiguous callers and the distinct directories
+// they live in. Ambiguous references are excluded so that generic names
+// (Get, run, ...) resolved by best-effort matching cannot inflate the count.
+func (s outlineSymbol) godHelperStats() (callers, dirs int) {
+	if s.Test {
+		return 0, 0
+	}
+	seen := map[string]bool{}
+	for _, c := range s.Callers {
+		if c.Ambiguous {
+			continue
+		}
+		callers++
+		seen[filepath.ToSlash(filepath.Dir(c.Path))] = true
+	}
+	return callers, len(seen)
+}
+
+// godHelper flags a symbol that many unrelated parts of the codebase call:
+// high fan-in alone is fine for a stable utility, but combined with callers
+// scattered across directories it marks a helper that crosses
+// responsibility boundaries.
+func (s outlineSymbol) godHelper() bool {
+	callers, dirs := s.godHelperStats()
+	return callers >= outlineGodHelperFanIn && dirs >= outlineGodHelperDirs
+}
+
+// bloatGrowth reports how many lines a paired callable grew while keeping
+// (or merely tweaking) its signature. Requires both +outlineBloatMinGrowth
+// lines and a 1.5x size increase.
+func (s outlineSymbol) bloatGrowth() (growth int, ok bool) {
+	if s.Test || !outlineCallableSymbolKind(s.Kind) {
+		return 0, false
+	}
+	if s.Change != outlineBodyOnly && s.Change != outlineSignatureChanged {
+		return 0, false
+	}
+	if s.OldEndLine == 0 || s.OldStartLine == 0 || s.EndLine == 0 {
+		return 0, false
+	}
+	newLines := s.EndLine - s.StartLine + 1
+	oldLines := s.OldEndLine - s.OldStartLine + 1
+	growth = newLines - oldLines
+	if growth < outlineBloatMinGrowth {
+		return 0, false
+	}
+	if newLines*2 < oldLines*3 {
+		return 0, false
+	}
+	return growth, true
+}
+
+// bigAddedLines reports the size of a brand-new callable that already
+// exceeds outlineBigAddedLines. New files classify every symbol as added,
+// so oversized functions in generated-from-scratch code are caught too.
+func (s outlineSymbol) bigAddedLines() (lines int, ok bool) {
+	if s.Test || s.Change != outlineAdded || !outlineCallableSymbolKind(s.Kind) {
+		return 0, false
+	}
+	if s.EndLine == 0 {
+		return 0, false
+	}
+	lines = s.EndLine - s.StartLine + 1
+	return lines, lines >= outlineBigAddedLines
+}
+
+// smellMask identifies which smells a symbol (or its file/directory
+// subtree) carries; bloat and big are mutually exclusive by Change, so a
+// single symbol carries at most two bits.
+type smellMask uint8
+
+const (
+	smellGod   smellMask = 1 << iota // called from many unrelated directories
+	smellBloat                       // body grew while the signature stayed put
+	smellBig                         // oversized brand-new callable
+)
+
+func (s outlineSymbol) smells() smellMask {
+	var m smellMask
+	if s.godHelper() {
+		m |= smellGod
+	}
+	if _, ok := s.bloatGrowth(); ok {
+		m |= smellBloat
+	}
+	if _, ok := s.bigAddedLines(); ok {
+		m |= smellBig
+	}
+	return m
+}
+
+// smellChipLabels returns the aggregate chip labels (no counts) in a fixed
+// order matching the per-symbol chip order.
+func smellChipLabels(m smellMask) []string {
+	var labels []string
+	if m&smellGod != 0 {
+		labels = append(labels, "god")
+	}
+	if m&smellBloat != 0 {
+		labels = append(labels, "bloat")
+	}
+	if m&smellBig != 0 {
+		labels = append(labels, "big")
+	}
+	return labels
+}
+
+// smellQueryText feeds the "/" filter. Japanese aliases match the preview
+// explanations, so /肥大 and /bloat find the same symbols.
+func (s outlineSymbol) smellQueryText() string {
+	var parts []string
+	if s.godHelper() {
+		parts = append(parts, "god-helper 呼出集中")
+	}
+	if _, ok := s.bloatGrowth(); ok {
+		parts = append(parts, "bloat 肥大")
+	}
+	if _, ok := s.bigAddedLines(); ok {
+		parts = append(parts, "big 巨大")
+	}
+	return strings.Join(parts, " ")
 }
 
 // outlineFile keeps production and test symbols separate so tests can remain
@@ -102,6 +247,14 @@ func (f outlineFile) apiCount() int {
 		}
 	}
 	return n
+}
+
+func (f outlineFile) smells() smellMask {
+	var m smellMask
+	for _, symbol := range f.Symbols {
+		m |= symbol.smells()
+	}
+	return m
 }
 
 func (f outlineFile) fanIn() int {

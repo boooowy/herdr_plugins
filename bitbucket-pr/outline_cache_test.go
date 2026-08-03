@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,8 +24,25 @@ func TestOutlineCacheRoundTripAndIdentity(t *testing.T) {
 	if got := loadOutlineCache("team/name", "repo name", "source-1", "other"); got != nil {
 		t.Fatalf("destination mismatch returned %+v", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "cache", "outline-v2-team_name__repo_name__source-1__dest-1.json")); err != nil {
+	name := fmt.Sprintf("outline-v%d-team_name__repo_name__source-1__dest-1.json", outlineSchemaVersion)
+	if _, err := os.Stat(filepath.Join(dir, "cache", name)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOutlineCacheRejectsStaleSchema(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
+	path := outlineCachePath("ws", "repo", "source", "dest")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := fmt.Sprintf(`{"schema":%d,"source_hash":"source","destination_hash":"dest"}`, outlineSchemaVersion-1)
+	if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadOutlineCache("ws", "repo", "source", "dest"); got != nil {
+		t.Fatalf("stale schema cache = %+v", got)
 	}
 }
 

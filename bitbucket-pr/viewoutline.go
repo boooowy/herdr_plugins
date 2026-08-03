@@ -37,6 +37,7 @@ type outlineDirNode struct {
 
 type outlineDirStats struct {
 	Files, Changed, API, FanIn int
+	Smells                     smellMask
 	Risk, Large                bool
 }
 
@@ -219,7 +220,7 @@ func (v *detailView) appendOutlineDirRows(rows *[]Row, node *outlineDirNode, res
 		if cycles[node.Path] {
 			spans = append(spans, Span{" (cycle)", styleOutdated})
 		}
-		spans = appendOutlineBadges(spans, stats.Changed, stats.API, stats.FanIn, 0, width)
+		spans = appendOutlineBadges(spans, stats.Changed, stats.API, stats.FanIn, stats.Smells, 0, width)
 		*rows = append(*rows, row(RowOutlineDir, outlineRowRef{Kind: "dir", Path: node.Path}, true, spans...))
 		if v.outline.collapsedDirs[node.Path] && q == "" {
 			return true
@@ -275,7 +276,7 @@ func (v *detailView) appendOutlineFileRows(rows *[]Row, result *outlineResult, f
 	if file.Skipped != "" {
 		spans = append(spans, Span{" (skipped: " + file.Skipped + ")", styleDim})
 	} else {
-		spans = appendOutlineBadges(spans, file.changedCount(), file.apiCount(), file.fanIn(), file.Lines, width)
+		spans = appendOutlineBadges(spans, file.changedCount(), file.apiCount(), file.fanIn(), file.smells(), file.Lines, width)
 	}
 	*rows = append(*rows, row(RowOutlineFile, outlineRowRef{Kind: "file", Path: file.Path}, true, spans...))
 	if file.Skipped != "" || v.outline.collapsedFiles[file.Path] && q == "" {
@@ -328,13 +329,25 @@ func outlineSymbolRow(symbol outlineSymbol, depth int) Row {
 	if symbol.FanIn > 0 {
 		spans = append(spans, Span{fmt.Sprintf("  fan-in:%d", symbol.FanIn), styleMeta})
 	}
+	if symbol.godHelper() {
+		spans = append(spans, Span{" ", styleNone}, Span{" god ", styleSmellBadge})
+	}
+	if growth, ok := symbol.bloatGrowth(); ok {
+		spans = append(spans, Span{" ", styleNone}, Span{fmt.Sprintf(" bloat:+%d ", growth), styleSmellBadge})
+	}
+	if lines, ok := symbol.bigAddedLines(); ok {
+		spans = append(spans, Span{" ", styleNone}, Span{fmt.Sprintf(" big:%d ", lines), styleSmellBadge})
+	}
 	return row(RowOutlineSymbol, outlineRowRef{Kind: "symbol", Path: symbol.Path, ID: symbol.ID}, true, spans...)
 }
 
-func appendOutlineBadges(spans []Span, changed, api, fanIn, lines, width int) []Span {
+func appendOutlineBadges(spans []Span, changed, api, fanIn int, smells smellMask, lines, width int) []Span {
 	spans = append(spans, Span{fmt.Sprintf("  chg:%d", changed), styleMeta})
 	if api > 0 {
 		spans = append(spans, Span{fmt.Sprintf("  api:%d", api), styleOutdated})
+	}
+	for _, label := range smellChipLabels(smells) {
+		spans = append(spans, Span{" ", styleNone}, Span{" " + label + " ", styleSmellBadge})
 	}
 	if fanIn > 0 {
 		spans = append(spans, Span{fmt.Sprintf("  fan-in:%d", fanIn), styleMeta})
@@ -355,7 +368,7 @@ func filterOutlineSymbols(symbols []outlineSymbol, q string, pathMatches bool) [
 	}
 	out := make([]outlineSymbol, 0, len(symbols))
 	for _, symbol := range symbols {
-		if matchQuery(q, symbol.Name, symbol.Kind, symbol.Signature, symbol.OldSignature, string(symbol.Change)) {
+		if matchQuery(q, symbol.Name, symbol.Kind, symbol.Signature, symbol.OldSignature, string(symbol.Change), symbol.smellQueryText()) {
 			out = append(out, symbol)
 		}
 	}
@@ -389,6 +402,7 @@ func outlineStatsForDir(node *outlineDirNode, result *outlineResult) outlineDirS
 		stats.Changed += file.changedCount()
 		stats.API += file.apiCount()
 		stats.FanIn += file.fanIn()
+		stats.Smells |= file.smells()
 		stats.Risk = stats.Risk || file.risky()
 		stats.Large = stats.Large || file.Lines >= outlineLargeFileLine
 	}
@@ -398,6 +412,7 @@ func outlineStatsForDir(node *outlineDirNode, result *outlineResult) outlineDirS
 		stats.Changed += childStats.Changed
 		stats.API += childStats.API
 		stats.FanIn += childStats.FanIn
+		stats.Smells |= childStats.Smells
 		stats.Risk = stats.Risk || childStats.Risk
 		stats.Large = stats.Large || childStats.Large
 	}
@@ -529,6 +544,17 @@ func (v *detailView) outlinePreviewRows(a *app, d *prDetail, ref outlineRowRef, 
 		if symbol.risky() {
 			rows = append(rows, textRow(Span{fmt.Sprintf(" ! contract change + fan-in:%d", symbol.FanIn), styleError}))
 		}
+		if symbol.godHelper() {
+			callers, dirs := symbol.godHelperStats()
+			rows = append(rows, textRow(Span{fmt.Sprintf(" ! god: %d箇所・%dディレクトリから呼ばれています。責務の分割を検討する価値があります", callers, dirs), styleOutdated}))
+		}
+		if growth, ok := symbol.bloatGrowth(); ok {
+			oldLines := symbol.OldEndLine - symbol.OldStartLine + 1
+			rows = append(rows, textRow(Span{fmt.Sprintf(" ! bloat: シグネチャは同じまま本体が %d行 → %d行 (+%d) に増えています", oldLines, oldLines+growth, growth), styleOutdated}))
+		}
+		if lines, ok := symbol.bigAddedLines(); ok {
+			rows = append(rows, textRow(Span{fmt.Sprintf(" ! big: 新規追加の%sが%d行あります", outlineKindJa(symbol.Kind), lines), styleOutdated}))
+		}
 		rows = append(rows, textRow())
 		if symbol.OldSignature != "" && symbol.OldSignature != symbol.Signature {
 			rows = append(rows, textRow(Span{" Signature", styleTitle}))
@@ -572,6 +598,19 @@ func (v *detailView) outlinePreviewRows(a *app, d *prDetail, ref outlineRowRef, 
 		}
 	}
 	return nil
+}
+
+// outlineKindJa renders a callable kind for Japanese preview sentences.
+// Only kinds that pass outlineCallableSymbolKind can reach it.
+func outlineKindJa(kind string) string {
+	switch kind {
+	case "method":
+		return "メソッド"
+	case "ctor":
+		return "コンストラクタ"
+	default:
+		return "関数"
+	}
 }
 
 func outlineChangeStyle(change outlineChange) StyleID {

@@ -255,10 +255,10 @@ func classifyOutlineFile(diff *FileDiff, newSource, oldSource map[string][]byte,
 		}
 		raw := newSymbols[ni]
 		change := outlineAdded
-		oldSignature, oldStart := "", 0
+		oldSignature, oldStart, oldEnd := "", 0, 0
 		if paired {
 			old := oldSymbols[oi]
-			oldSignature, oldStart = old.Signature, old.StartLine
+			oldSignature, oldStart, oldEnd = old.Signature, old.StartLine, old.EndLine
 			if raw.Signature != old.Signature {
 				change = outlineSignatureChanged
 			} else {
@@ -268,6 +268,7 @@ func classifyOutlineFile(diff *FileDiff, newSource, oldSource map[string][]byte,
 		symbol := makeOutlineSymbol(raw, oldPath, change)
 		symbol.OldSignature = oldSignature
 		symbol.OldStartLine = oldStart
+		symbol.OldEndLine = oldEnd
 		appendOutlineSymbol(&file, symbol)
 		mappings = append(mappings, outlineChangedRaw{Symbol: symbol, Raw: raw})
 	}
@@ -285,6 +286,7 @@ func classifyOutlineFile(diff *FileDiff, newSource, oldSource map[string][]byte,
 		symbol.OldSignature = raw.Signature
 		symbol.Signature = ""
 		symbol.OldStartLine = raw.StartLine
+		symbol.OldEndLine = raw.EndLine
 		symbol.StartLine, symbol.EndLine = 0, 0
 		appendOutlineSymbol(&file, symbol)
 		mappings = append(mappings, outlineChangedRaw{Symbol: symbol, Raw: raw})
