@@ -73,6 +73,88 @@ func outlineDirOrder(rows []Row) []string {
 	return paths
 }
 
+func smellOutlineFixture() *outlineResult {
+	godBloat := outlineSymbol{
+		ID: "godbloat", Path: "util/helpers.go", Language: "Go", Name: "DoAll", Kind: "fn",
+		Signature: "func DoAll(v int) error", OldSignature: "func DoAll(v int) error",
+		Change: outlineBodyOnly, StartLine: 1, EndLine: 60, OldStartLine: 1, OldEndLine: 20,
+		FanIn: 5, Callers: []outlineRef{
+			{ID: "c1", Path: "api/a.go", Name: "a", Kind: "fn", Line: 1},
+			{ID: "c2", Path: "api/b.go", Name: "b", Kind: "fn", Line: 1},
+			{ID: "c3", Path: "batch/c.go", Name: "c", Kind: "fn", Line: 1},
+			{ID: "c4", Path: "batch/d.go", Name: "d", Kind: "fn", Line: 1},
+			{ID: "c5", Path: "cli/e.go", Name: "e", Kind: "fn", Line: 1},
+		},
+	}
+	big := outlineSymbol{
+		ID: "big", Path: "util/helpers.go", Language: "Go", Name: "BuildEverything", Kind: "fn",
+		Signature: "func BuildEverything() error", Change: outlineAdded, StartLine: 70, EndLine: 159,
+	}
+	bigStruct := outlineSymbol{
+		ID: "bigstruct", Path: "util/helpers.go", Language: "Go", Name: "Registry", Kind: "struct",
+		Signature: "type Registry struct", Change: outlineAdded, StartLine: 160, EndLine: 400,
+	}
+	clean := outlineSymbol{
+		ID: "clean", Path: "app/main.go", Language: "Go", Name: "main", Kind: "fn",
+		Signature: "func main()", Change: outlineBodyOnly, StartLine: 5, EndLine: 12,
+	}
+	return &outlineResult{
+		Schema: outlineSchemaVersion, SourceHash: "source", DestinationHash: "destination",
+		Files: []outlineFile{
+			{Path: "app/main.go", Language: "Go", Lines: 40, Symbols: []outlineSymbol{clean}},
+			{Path: "util/helpers.go", Language: "Go", Lines: 400, Symbols: []outlineSymbol{godBloat, big, bigStruct}},
+		},
+	}
+}
+
+func TestOutlineRowsShowSmellBadges(t *testing.T) {
+	a, v, d := outlineFixtureApp(120)
+	d.outline = smellOutlineFixture()
+	text := outlineRowTexts(v.outlineRows(a, d))
+	for _, want := range []string{"  god", "bloat:+40", "big:90", "smell:3"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("outline rows missing %q:\n%s", want, text)
+		}
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "Registry") && (strings.Contains(line, "big:") || strings.Contains(line, "smell:")) {
+			t.Errorf("struct symbol must not carry size badges: %q", line)
+		}
+		if strings.Contains(line, "main.go") && strings.Contains(line, "smell:") {
+			t.Errorf("clean file must not carry smell badge: %q", line)
+		}
+	}
+}
+
+func TestOutlinePreviewExplainsSmells(t *testing.T) {
+	a, v, d := outlineFixtureApp(120)
+	d.outline = smellOutlineFixture()
+	text := outlineRowTexts(v.outlinePreviewRows(a, d, outlineRowRef{Kind: "symbol", ID: "godbloat"}, 80))
+	for _, want := range []string{"god-helper: 5 callers across 3 directories", "body bloat: 20 → 60 lines (+40)"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("preview missing %q:\n%s", want, text)
+		}
+	}
+	text = outlineRowTexts(v.outlinePreviewRows(a, d, outlineRowRef{Kind: "symbol", ID: "big"}, 80))
+	if !strings.Contains(text, "large new fn: 90 lines") {
+		t.Errorf("preview missing big explanation:\n%s", text)
+	}
+	text = outlineRowTexts(v.outlinePreviewRows(a, d, outlineRowRef{Kind: "symbol", ID: "clean"}, 80))
+	if strings.Contains(text, "god-helper") || strings.Contains(text, "bloat") {
+		t.Errorf("clean symbol preview has smell rows:\n%s", text)
+	}
+}
+
+func TestOutlineSearchFindsSmellTokens(t *testing.T) {
+	a, v, d := outlineFixtureApp(120)
+	d.outline = smellOutlineFixture()
+	v.search[tabOutline].buf = []byte("bloat")
+	text := outlineRowTexts(v.outlineRows(a, d))
+	if !strings.Contains(text, "DoAll") || strings.Contains(text, "BuildEverything") || strings.Contains(text, "main.go") {
+		t.Fatalf("smell-filtered outline =\n%s", text)
+	}
+}
+
 func TestOutlineRowsShowAttentionBadgesAndCollapsedTests(t *testing.T) {
 	a, v, d := outlineFixtureApp(120)
 	rows := v.outlineRows(a, d)
