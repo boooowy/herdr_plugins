@@ -52,9 +52,9 @@ Review Outline（詳細の `2:Outline`）:
  1:Overview   2:Outline   3:Files (8)   4:Comments (4)
 ──────────────────────────────────────────────────────────────────────────────
  5 changed symbols (tests:2) in 3/3 files  │ method NewRouteCache  signature_changed
- ! v internal/cache  chg:3 api:2 [肥大]    │ ! contract change + fan-in:5
-     v route_cache.go  chg:2 api:1 [肥大]   │ ! 肥大: シグネチャは同じまま本体が
-       ~ fn NewRouteCache api fan-in:5 [肥大+44]│   20行 → 64行 (+44) に増えています
+ ! v internal/cache  chg:3 api:2 [bloat]   │ ! contract change + fan-in:5
+     v route_cache.go  chg:2 api:1 [bloat]  │ ! bloat: シグネチャは同じまま本体が
+       ~ fn NewRouteCache api fan-in:5 [bloat:+44]│   20行 → 64行 (+44) に増えています
          fn loadEntry                       │ Signature
        > 2 tests                            │ - func NewRouteCache(r *redis.Client)
    v cmd  chg:2 api:1                       │ + func NewRouteCache(r *redis.Client, ttl ...)
@@ -71,19 +71,19 @@ Outline は Tree-sitter で変更シンボルと1-hopの caller/callee を抽出
 影響範囲の完全性を保証するものではありません。テストシンボルはファイルごとに初期状態で折り畳み、
 広い画面では右側にシグネチャ・参照元/先・関連 hunk を表示します。
 
-コードスメルチップ（AI が書いた PR に頻出する設計上の引っかかりの先出し。黄背景の塗り
-バッジで表示、上の画面例では `[ ]` で表現）:
+コードスメルチップ（AI が書いた PR に頻出する設計上の引っかかりの先出し。ゴールド背景
+`#c69726`・ダーク文字 `#232323` の塗りバッジで表示、上の画面例では `[ ]` で表現）:
 
-- `呼出集中` — caller が 5 箇所以上かつ 3 ディレクトリ以上に散っているシンボル（いわゆる
+- `god` — caller が 5 箇所以上かつ 3 ディレクトリ以上に散っているシンボル（いわゆる
   神ヘルパー）。責務の境界を跨いで依存されており、正しさ以前に分割を検討する価値があります
-- `肥大+N` — シグネチャは据え置きのまま body が +30 行以上かつ 1.5 倍以上に肥大した
+- `bloat:+N` — シグネチャは据え置きのまま body が +30 行以上かつ 1.5 倍以上に肥大した
   既存の関数/メソッド
-- `巨大N行` — 新規追加された 80 行以上の関数/メソッド（新規ファイルの巨大関数も対象）
+- `big:N` — 新規追加された 80 行以上の関数/メソッド（新規ファイルの巨大関数も対象）
 
-ファイル/ディレクトリ行には配下に存在するスメルの種別チップ（`肥大` 等、件数なし）が
-集約表示され、`/肥大` `/bloat` など日英どちらのキーワードでも該当シンボルだけに絞り込めます。
+ファイル/ディレクトリ行には配下に存在するスメルの種別チップ（`bloat` 等、件数なし）が
+集約表示され、`/bloat` `/肥大` など日英どちらのキーワードでも該当シンボルだけに絞り込めます。
 型定義（struct/class 等）とテストコードは、正当に大きくなりやすいためスメル判定の対象外です。
-判定根拠は右側プレビューに日本語で表示されます。
+判定根拠と望ましい対処は右側プレビューに日本語で表示されます。
 
 diff ビュー（hunk 単位・インラインコメント埋め込み）:
 

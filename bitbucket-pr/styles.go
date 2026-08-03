@@ -111,7 +111,7 @@ func sgrTable(cfg Config) map[StyleID]string {
 		styleSynComment:  codeBg + "\x1b[3;90m",
 		styleSynNumber:   codeBg + "\x1b[38;5;215m",
 		styleSynFunc:     codeBg + "\x1b[34m",
-		styleSmellBadge:  "\x1b[43;30m",
+		styleSmellBadge:  "\x1b[" + colorCode("#c69726", true) + ";" + colorCode("#232323", false) + "m",
 	}
 	// Comment-area and focus variants: the area bg comes first so a style's
 	// own bg (code blocks) still wins where present. Focus replaces the

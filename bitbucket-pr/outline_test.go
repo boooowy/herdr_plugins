@@ -117,14 +117,14 @@ func TestOutlineSmellMaskAndQueryText(t *testing.T) {
 	if got := s.smells(); got != smellGod|smellBloat {
 		t.Errorf("smells() = %b, want god|bloat", got)
 	}
-	if got := s.smellQueryText(); got != "呼出集中 god-helper 肥大 bloat" {
+	if got := s.smellQueryText(); got != "god-helper 呼出集中 bloat 肥大" {
 		t.Errorf("smellQueryText() = %q", got)
 	}
 	file := outlineFile{Symbols: []outlineSymbol{s, {Kind: "fn", Change: outlineAdded, StartLine: 1, EndLine: 90}}}
 	if got := file.smells(); got != smellGod|smellBloat|smellBig {
 		t.Errorf("file smells() = %b, want god|bloat|big", got)
 	}
-	if got := smellChipLabels(file.smells()); len(got) != 3 || got[0] != "呼出集中" || got[1] != "肥大" || got[2] != "巨大" {
+	if got := smellChipLabels(file.smells()); len(got) != 3 || got[0] != "god" || got[1] != "bloat" || got[2] != "big" {
 		t.Errorf("smellChipLabels() = %v", got)
 	}
 	if got := (outlineSymbol{Kind: "fn", Change: outlineBodyOnly}).smellQueryText(); got != "" {

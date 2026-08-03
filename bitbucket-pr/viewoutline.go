@@ -330,13 +330,13 @@ func outlineSymbolRow(symbol outlineSymbol, depth int) Row {
 		spans = append(spans, Span{fmt.Sprintf("  fan-in:%d", symbol.FanIn), styleMeta})
 	}
 	if symbol.godHelper() {
-		spans = append(spans, Span{" ", styleNone}, Span{" 呼出集中 ", styleSmellBadge})
+		spans = append(spans, Span{" ", styleNone}, Span{" god ", styleSmellBadge})
 	}
 	if growth, ok := symbol.bloatGrowth(); ok {
-		spans = append(spans, Span{" ", styleNone}, Span{fmt.Sprintf(" 肥大+%d ", growth), styleSmellBadge})
+		spans = append(spans, Span{" ", styleNone}, Span{fmt.Sprintf(" bloat:+%d ", growth), styleSmellBadge})
 	}
 	if lines, ok := symbol.bigAddedLines(); ok {
-		spans = append(spans, Span{" ", styleNone}, Span{fmt.Sprintf(" 巨大%d行 ", lines), styleSmellBadge})
+		spans = append(spans, Span{" ", styleNone}, Span{fmt.Sprintf(" big:%d ", lines), styleSmellBadge})
 	}
 	return row(RowOutlineSymbol, outlineRowRef{Kind: "symbol", Path: symbol.Path, ID: symbol.ID}, true, spans...)
 }
@@ -546,14 +546,14 @@ func (v *detailView) outlinePreviewRows(a *app, d *prDetail, ref outlineRowRef, 
 		}
 		if symbol.godHelper() {
 			callers, dirs := symbol.godHelperStats()
-			rows = append(rows, textRow(Span{fmt.Sprintf(" ! 呼出集中: %d箇所・%dディレクトリから呼ばれています。責務の分割を検討する価値があります", callers, dirs), styleOutdated}))
+			rows = append(rows, textRow(Span{fmt.Sprintf(" ! god: %d箇所・%dディレクトリから呼ばれています。責務の分割を検討する価値があります", callers, dirs), styleOutdated}))
 		}
 		if growth, ok := symbol.bloatGrowth(); ok {
 			oldLines := symbol.OldEndLine - symbol.OldStartLine + 1
-			rows = append(rows, textRow(Span{fmt.Sprintf(" ! 肥大: シグネチャは同じまま本体が %d行 → %d行 (+%d) に増えています", oldLines, oldLines+growth, growth), styleOutdated}))
+			rows = append(rows, textRow(Span{fmt.Sprintf(" ! bloat: シグネチャは同じまま本体が %d行 → %d行 (+%d) に増えています", oldLines, oldLines+growth, growth), styleOutdated}))
 		}
 		if lines, ok := symbol.bigAddedLines(); ok {
-			rows = append(rows, textRow(Span{fmt.Sprintf(" ! 巨大: 新規追加の%sが%d行あります", outlineKindJa(symbol.Kind), lines), styleOutdated}))
+			rows = append(rows, textRow(Span{fmt.Sprintf(" ! big: 新規追加の%sが%d行あります", outlineKindJa(symbol.Kind), lines), styleOutdated}))
 		}
 		rows = append(rows, textRow())
 		if symbol.OldSignature != "" && symbol.OldSignature != symbol.Signature {

@@ -111,7 +111,7 @@ func TestOutlineRowsShowSmellChips(t *testing.T) {
 	a, v, d := outlineFixtureApp(120)
 	d.outline = smellOutlineFixture()
 	text := outlineRowTexts(v.outlineRows(a, d))
-	for _, want := range []string{" 呼出集中 ", " 肥大+40 ", " 巨大90行 "} {
+	for _, want := range []string{" god ", " bloat:+40 ", " big:90 "} {
 		if !strings.Contains(text, want) {
 			t.Errorf("outline rows missing %q:\n%s", want, text)
 		}
@@ -121,13 +121,13 @@ func TestOutlineRowsShowSmellChips(t *testing.T) {
 	}
 	sawHelperFileChips := false
 	for _, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, "helpers.go") && strings.Contains(line, " 肥大 ") && strings.Contains(line, " 巨大 ") {
+		if strings.Contains(line, "helpers.go") && strings.Contains(line, " bloat ") && strings.Contains(line, " big ") {
 			sawHelperFileChips = true
 		}
-		if strings.Contains(line, "Registry") && (strings.Contains(line, "巨大") || strings.Contains(line, "肥大")) {
+		if strings.Contains(line, "Registry") && (strings.Contains(line, "big") || strings.Contains(line, "bloat")) {
 			t.Errorf("struct symbol must not carry size chips: %q", line)
 		}
-		if strings.Contains(line, "main.go") && (strings.Contains(line, "肥大") || strings.Contains(line, "巨大") || strings.Contains(line, "呼出集中")) {
+		if strings.Contains(line, "main.go") && (strings.Contains(line, "bloat") || strings.Contains(line, "big") || strings.Contains(line, "god")) {
 			t.Errorf("clean file must not carry smell chips: %q", line)
 		}
 	}
@@ -140,17 +140,17 @@ func TestOutlinePreviewExplainsSmells(t *testing.T) {
 	a, v, d := outlineFixtureApp(120)
 	d.outline = smellOutlineFixture()
 	text := outlineRowTexts(v.outlinePreviewRows(a, d, outlineRowRef{Kind: "symbol", ID: "godbloat"}, 80))
-	for _, want := range []string{"呼出集中: 5箇所・3ディレクトリから呼ばれています", "肥大: シグネチャは同じまま本体が 20行 → 60行 (+40) に増えています"} {
+	for _, want := range []string{"god: 5箇所・3ディレクトリから呼ばれています", "bloat: シグネチャは同じまま本体が 20行 → 60行 (+40) に増えています"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("preview missing %q:\n%s", want, text)
 		}
 	}
 	text = outlineRowTexts(v.outlinePreviewRows(a, d, outlineRowRef{Kind: "symbol", ID: "big"}, 80))
-	if !strings.Contains(text, "巨大: 新規追加の関数が90行あります") {
+	if !strings.Contains(text, "big: 新規追加の関数が90行あります") {
 		t.Errorf("preview missing big explanation:\n%s", text)
 	}
 	text = outlineRowTexts(v.outlinePreviewRows(a, d, outlineRowRef{Kind: "symbol", ID: "clean"}, 80))
-	if strings.Contains(text, "呼出集中") || strings.Contains(text, "肥大") {
+	if strings.Contains(text, "god:") || strings.Contains(text, "bloat:") {
 		t.Errorf("clean symbol preview has smell rows:\n%s", text)
 	}
 }

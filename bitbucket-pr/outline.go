@@ -174,9 +174,9 @@ func (s outlineSymbol) bigAddedLines() (lines int, ok bool) {
 type smellMask uint8
 
 const (
-	smellGod   smellMask = 1 << iota // 呼出集中
-	smellBloat                       // 肥大
-	smellBig                         // 巨大
+	smellGod   smellMask = 1 << iota // called from many unrelated directories
+	smellBloat                       // body grew while the signature stayed put
+	smellBig                         // oversized brand-new callable
 )
 
 func (s outlineSymbol) smells() smellMask {
@@ -198,29 +198,29 @@ func (s outlineSymbol) smells() smellMask {
 func smellChipLabels(m smellMask) []string {
 	var labels []string
 	if m&smellGod != 0 {
-		labels = append(labels, "呼出集中")
+		labels = append(labels, "god")
 	}
 	if m&smellBloat != 0 {
-		labels = append(labels, "肥大")
+		labels = append(labels, "bloat")
 	}
 	if m&smellBig != 0 {
-		labels = append(labels, "巨大")
+		labels = append(labels, "big")
 	}
 	return labels
 }
 
-// smellQueryText feeds the "/" filter. Both the Japanese chip labels and
-// English aliases are listed so /肥大 and /bloat find the same symbols.
+// smellQueryText feeds the "/" filter. Japanese aliases match the preview
+// explanations, so /肥大 and /bloat find the same symbols.
 func (s outlineSymbol) smellQueryText() string {
 	var parts []string
 	if s.godHelper() {
-		parts = append(parts, "呼出集中 god-helper")
+		parts = append(parts, "god-helper 呼出集中")
 	}
 	if _, ok := s.bloatGrowth(); ok {
-		parts = append(parts, "肥大 bloat")
+		parts = append(parts, "bloat 肥大")
 	}
 	if _, ok := s.bigAddedLines(); ok {
-		parts = append(parts, "巨大 big")
+		parts = append(parts, "big 巨大")
 	}
 	return strings.Join(parts, " ")
 }
