@@ -7,7 +7,7 @@ PR 一覧 → 詳細（説明・変更シンボル・レビュアー・変更フ
 merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
-- version: `0.24.0`
+- version: `0.25.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -271,12 +271,18 @@ Bitbucket トップの「Your pull requests」「Pull requests to review」相�
 ```
 
 - **My PRs**: `/2.0/workspaces/{ws}/pullrequests/{自分のUUID}` で自分が作成した
-  OPEN の PR を1リクエストで横断取得します（更新順、最大200件）。
+  OPEN の PR を1リクエストで**漏れなく**横断取得します（更新順、最大200件）。
 - **Review**: Bitbucket の公開APIには「自分がレビュアーのPR」を横断取得する
-  エンドポイントが**存在しない**ため、**更新順上位 N 件のリポジトリ**
-  （`review_scan_repos`、既定30）へ個別に問い合わせて結合しています。
-  初回は数秒かかりますが、結果はキャッシュされ次回から即表示されます。
-  取得に失敗したリポジトリがあれば件数を警告表示します。
+  エンドポイントが**存在しない**ため（`role=reviewer` パラメータも無視される。実測確認済み）、
+  次の和集合のリポジトリへ個別に問い合わせて結合しています（重複排除、上限300件）:
+  1. `review_extra_repos` のピン指定
+  2. **自分が書き込み権限を持ち、直近 `review_scan_days` 日（既定30）に push があるリポジトリ**
+  3. 自分が作成した OPEN PR のリポジトリ
+  4. ローカル checkout のあるリポジトリ
+  5. **前回の Review 結果に含まれていたリポジトリ**（一度見つかれば以後も追跡）
+  初回は走査に数十秒かかります（進捗をフッタに表示）。結果はキャッシュされ
+  次回から即表示、裏で更新されます。取得に失敗したリポジトリがあれば件数を警告表示します。
+  Review の走査は自分が作成した PR も同時に取得するため、My PRs タブも温まります。
 - `Enter` で **PR詳細に直行**します（リポジトリのコンテキストは内部で切替）。
   `q`/`Esc` で横断一覧に戻ります。`/` は番号・リポジトリ名・タイトル・著者・
   ブランチで絞り込み。`C` はその PR のリポジトリを clone します。
@@ -371,7 +377,8 @@ repo_roots = []          # ローカルcheckoutの探索ルート（例: ["~/Doc
 clone_dir = ""           # C キーの clone 先。未設定なら repo_roots の先頭
 clone_protocol = "ssh"   # ssh | https（httpsは git credential helper の設定が必要）
 clone_args = []          # git clone の追加フラグ（例: ["--filter=blob:none"]。--depth は非推奨）
-review_scan_repos = 30   # Reviewビューが問い合わせる更新順上位リポジトリ数（1〜100）
+review_scan_days = 30    # Reviewビュー: 書き込み権限リポジトリをこの日数以内のpushで絞る（7〜365）
+review_extra_repos = []  # Reviewビュー: 常に走査するリポジトリslug（読み取り専用repoの補完用）
 placement = "tab"        # tab | split | zoomed | overlay — ビューア自体の配置
 list_tab_title = "PRs {repo}"  # ビューアの herdr タブ名。{repo} {workspace} が使える
 show_comments = true     # diff 内インラインコメントの初期表示
@@ -437,10 +444,13 @@ outdated_fg = "yellow"
   そのリポジトリ内のペインから一度 `open` すれば学習されて以後表示されます。
 - ピッカーで別リポジトリへ切り替えると、前のリポジトリで開いた外部 diff ツールのタブは
   追跡対象から外れます（タブ自体は残ります）。
-- Review ビューは公開APIの制約（レビュアー横断エンドポイントが無い）により
-  `review_scan_repos` 件のリポジトリしか見ません。それより古いリポジトリの
-  レビュー依頼は表示されないため、漏れなく確認したい場合はブラウザの
-  Bitbucket ダッシュボードを併用してください。My PRs は全リポジトリ横断です。
+- Review ビューは公開APIの制約（レビュアー横断エンドポイントが無い）により走査ベースです。
+  拾えないのは「**読み取り専用権限のリポジトリ**で、かつローカル checkout も無く、
+  過去の Review 結果にも出ていない」レビュー依頼だけです（書き込み権限の全リポジトリを
+  読める権限は対象が広すぎて走査できないための制約）。該当があれば
+  `review_extra_repos` にリポジトリ slug をピン指定してください。My PRs は全リポジトリ横断で完全です。
+- Review の走査は1回で最大300リクエストを消費します。Bitbucket API のレート制限
+  （およそ1000リクエスト/時）があるため、短時間に `r` 再読込を連打するのは避けてください。
 - 起動時は前回取得した一覧を即表示し、裏で最新に更新します
   （キャッシュは plugin の state ディレクトリ配下 `cache/`）。
 - アバターは中央を正方形に切り出して state ディレクトリ配下へ無期限で保存します。
