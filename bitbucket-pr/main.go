@@ -13,7 +13,7 @@ import (
 	"os"
 )
 
-const version = "0.26.0"
+const version = "0.27.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -28,6 +28,8 @@ func main() {
 		runDiffToolUI()
 	case "comment-ui":
 		runCommentUI()
+	case "memo-ui":
+		runMemoUI()
 	case "dump": // dev helper: print raw API responses to stdout
 		runDump(os.Args[2:])
 	case "version":
@@ -38,7 +40,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bitbucket-pr <action|ui|difftool-ui|comment-ui|dump|version>")
+	fmt.Fprintln(os.Stderr, "usage: bitbucket-pr <action|ui|difftool-ui|comment-ui|memo-ui|dump|version>")
 	os.Exit(2)
 }
 

@@ -247,19 +247,47 @@ func userNotes(notes []hunkNote) []hunkNote {
 	return out
 }
 
-// offerNotePosting is the after-hunk flow: list the harvested notes, ask
-// y/n, and post them as Bitbucket inline comments. Runs in the difftool
-// pane's terminal after the tool exits.
+// offerNotePosting is the after-hunk flow: list the harvested notes and ask
+// what to do with them — y posts them as Bitbucket inline comments, m hands
+// them to the viewer as local review memos (via the memo-import file the
+// viewer polls), n discards. Runs in the difftool pane's terminal after the
+// tool exits.
 func offerNotePosting(cfg Config, notes []hunkNote) {
 	ws, repo := os.Getenv(envWorkspace), os.Getenv(envRepo)
 	prID, _ := strconv.Atoi(os.Getenv(envPRID))
 	if ws == "" || repo == "" || prID == 0 {
-		return // launched outside the viewer: nowhere to post
+		return // launched outside the viewer: nowhere to send them
 	}
-	if !confirmNotePosting(cfg, notes, prID) {
+	memoFile := os.Getenv(envMemoImport)
+	switch confirmNoteAction(cfg, notes, prID, memoFile != "") {
+	case 'm':
+		exportNotesForMemoImport(cfg, notes, memoFile, prID)
+	case 'y':
+		postNotes(cfg, ws, repo, prID, notes)
+	}
+}
+
+// exportNotesForMemoImport writes the notes where the viewer's
+// watchMemoImport polls (write-then-rename so a half-written file is never
+// picked up). The viewer converts them into review memos on its main loop.
+func exportNotesForMemoImport(cfg Config, notes []hunkNote, path string, prID int) {
+	data, err := json.Marshal(notes)
+	if err == nil {
+		if err = os.WriteFile(path+".tmp", data, 0o600); err == nil {
+			err = os.Rename(path+".tmp", path)
+		}
+	}
+	if err != nil {
+		noteFail(cfg, "メモ取込ファイルを書けません: "+err.Error(), notes, prID)
 		return
 	}
+	fmt.Print("\x1b[2J\x1b[H")
+	fmt.Printf("✓ %d件の note をレビューメモとして取り込みます (ビューアの Memo タブに反映)\n", len(notes))
+	time.Sleep(700 * time.Millisecond) // let the message register before the popup closes
+}
 
+// postNotes posts the notes as Bitbucket inline comments.
+func postNotes(cfg Config, ws, repo string, prID int, notes []hunkNote) {
 	fmt.Print("\x1b[2J\x1b[H") // clear the prompt before the progress log
 	fmt.Printf("投稿中… (%d件)\n", len(notes))
 	email, token, ok := cfg.credentials()
@@ -299,12 +327,13 @@ func offerNotePosting(cfg Config, notes []hunkNote) {
 	time.Sleep(700 * time.Millisecond) // let the message register before the popup closes
 }
 
-// confirmNotePosting paints the note list and waits for y (post) / other
-// keys (discard).
-func confirmNotePosting(cfg Config, notes []hunkNote, prID int) bool {
+// confirmNoteAction paints the note list and waits for the user's choice:
+// 'y' (post as comments), 'm' (import as local review memos — offered only
+// when the viewer passed an import path), 0 (discard).
+func confirmNoteAction(cfg Config, notes []hunkNote, prID int, memoOK bool) rune {
 	w, h := termSize()
 	s := NewScreen(w, h)
-	s.WriteString(1, 0, fmt.Sprintf("bitbucket-pr — draft note %d件を PR #%d にコメント投稿しますか？", len(notes), prID), styleTitle, w)
+	s.WriteString(1, 0, fmt.Sprintf("bitbucket-pr — hunk の draft note %d件 (PR #%d) をどうしますか？", len(notes), prID), styleTitle, w)
 	paintSeparator(s, 1, w)
 	y := 2
 	for _, n := range notes {
@@ -318,8 +347,20 @@ func confirmNotePosting(cfg Config, notes []hunkNote, prID int) bool {
 		s.WriteString(4, y, truncateWidth(body, w-5), styleNone, w)
 		y++
 	}
-	s.WriteString(1, h-1, " y:投稿する  n/q:破棄", styleDim, w)
-	return paintAndWaitYes(s, cfg)
+	hint := " y:コメント投稿  n/q:破棄"
+	accept := []rune{'y', 'Y'}
+	if memoOK {
+		hint = " y:コメント投稿  m:メモとして取込  n/q:破棄"
+		accept = append(accept, 'm', 'M')
+	}
+	s.WriteString(1, h-1, hint, styleDim, w)
+	switch paintAndWaitChoice(s, cfg, accept...) {
+	case 'y', 'Y':
+		return 'y'
+	case 'm', 'M':
+		return 'm'
+	}
+	return 0
 }
 
 // noteFail shows the posting error and dumps the unposted notes to a rescue

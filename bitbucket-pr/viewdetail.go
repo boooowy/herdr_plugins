@@ -13,12 +13,13 @@ const (
 	tabOutline
 	tabFiles
 	tabComments
+	tabMemo
 	tabCount
 )
 
-// detailView shows one PR with four tabs: Overview / Outline / Files /
-// Comments. Outline is lazy: ordinary PR viewing keeps its current startup
-// cost until the user asks for structural analysis.
+// detailView shows one PR with five tabs: Overview / Outline / Files /
+// Comments / Memo. Outline is lazy: ordinary PR viewing keeps its current
+// startup cost until the user asks for structural analysis.
 type detailView struct {
 	prID int
 	tab  int
@@ -57,10 +58,12 @@ type detailView struct {
 	pendingAction   pendingDetailAction
 	prActionRunning bool
 
-	// search holds one `/` filter per tab (Overview has none); shownFiles is
-	// how many files the Files filter lets through, for the tab-bar count.
+	// search holds one `/` filter per tab (Overview has none); shownFiles /
+	// shownMemos are how many entries the tab's filter lets through, for the
+	// tab-bar counts.
 	search     [tabCount]searchBox
 	shownFiles int
+	shownMemos int
 
 	outline outlineViewState
 	// outlineGen invalidates an analysis goroutine after a force reload.
@@ -213,7 +216,184 @@ func (v *detailView) rebuild(a *app) {
 		} else {
 			v.vp[v.tab].Reset(v.commentRows(a, d))
 		}
+	case tabMemo:
+		v.vp[v.tab].Reset(v.memoRows(a))
 	}
+}
+
+// rebuildMemoTab refreshes any detail view currently showing this PR's Memo
+// tab — a memo landed from the diff view or an editor closure, so its rows
+// (and the tab-bar count) are stale.
+func rebuildMemoTab(a *app, prID int) {
+	for _, vw := range a.stack {
+		if dv, ok := vw.(*detailView); ok && dv.prID == prID && dv.tab == tabMemo {
+			dv.rebuild(a)
+		}
+	}
+}
+
+// memoRows lists the PR's review memos one per row, in creation order:
+// " 📝 L42 path 「本文の先頭行…」".
+func (v *detailView) memoRows(a *app) []Row {
+	var rows []Row
+	store := a.memosFor(v.prID)
+	q := v.search[tabMemo].query()
+	v.shownMemos = 0
+	for _, m := range store.memos {
+		if !matchQuery(q, m.Path, m.Body) {
+			continue
+		}
+		v.shownMemos++
+		label := m.lineLabel()
+		if m.Path == "" {
+			label = "PR全体"
+		}
+		spans := []Span{
+			{" 📝 ", styleNone},
+			{label + " ", styleMeta},
+		}
+		used := displayWidth(spans[0].Text) + displayWidth(spans[1].Text)
+		if m.Path != "" {
+			path := truncateWidthLeft(m.Path, max(a.w/2-used, 10))
+			spans = append(spans, Span{path, styleTitle})
+			used += displayWidth(path)
+		}
+		if w := a.w - used - 6; w > 1 {
+			spans = append(spans, Span{" 「" + truncateWidth(memoExcerpt(m), w) + "」", styleDim})
+		}
+		r := row(RowMemo, m.ID, true, spans...)
+		r.CursorRows = 1
+		rows = append(rows, r)
+	}
+	if v.shownMemos == 0 {
+		msg := " (メモはまだありません — diff で m、ここで m は PR全体メモ)"
+		if q != "" {
+			msg = " (一致するメモはありません)"
+		}
+		rows = append(rows, textRow(Span{msg, styleDim}))
+	}
+	return rows
+}
+
+// memoExcerpt is the memo body's first non-empty line, for the one-line list.
+func memoExcerpt(m reviewMemo) string {
+	for _, line := range strings.Split(m.Body, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+// currentMemoID returns the memo under the Memo-tab cursor.
+func (v *detailView) currentMemoID() (int64, bool) {
+	r := v.vp[tabMemo].Current()
+	if r == nil || r.Kind != RowMemo {
+		return 0, false
+	}
+	id, ok := r.Item.(int64)
+	return id, ok
+}
+
+// memoTarget names a memo's anchor for the editor status line.
+func memoTarget(m reviewMemo) string {
+	if m.Path == "" {
+		return "PR全体へのメモ"
+	}
+	return m.Path + " " + m.lineLabel() + " へのメモ"
+}
+
+// composeMemo opens the memo editor anchored to the current tab context
+// (see memoContext). The anchor is captured in the onSave closure; the memo
+// lands in the store only when the editor saves a non-empty body.
+func (v *detailView) composeMemo(a *app) {
+	memo, target := v.memoContext(a)
+	prID := v.prID
+	openMemoEditor(a, prID, "", target, func(a *app, body string) {
+		memo.Body = body
+		store := a.memosFor(prID)
+		store.add(memo)
+		a.status = fmt.Sprintf("メモを追加しました (%d件 — M:一覧)", len(store.memos))
+		rebuildMemoTab(a, prID)
+	})
+}
+
+// memoContext resolves what a new memo anchors to. Files tab: the file
+// under the cursor. Outline tab: a symbol row anchors to its definition
+// line, dir/file/tests rows to their path. Comments tab: a file header row
+// anchors to its file, a thread row to the thread's file + line range (with
+// the diff excerpt snapshotted). Everything else — general threads included
+// — falls back to a PR-level memo.
+func (v *detailView) memoContext(a *app) (reviewMemo, string) {
+	d := a.detailFor(v.prID)
+	switch v.tab {
+	case tabFiles:
+		if r := v.vp[tabFiles].Current(); r != nil && r.Kind == RowFile {
+			if i, ok := r.Item.(int); ok && i >= 0 && i < len(d.diffstat) {
+				path := d.diffstat[i].Path()
+				return fileMemo(path), path + " へのメモ"
+			}
+		}
+	case tabOutline:
+		if s := v.currentOutlineSymbol(a); s != nil {
+			m := memoFromSymbol(d.files, s)
+			label := ""
+			if l := m.lineLabel(); l != "" {
+				label = " " + l
+			}
+			return m, m.Path + label + " (" + s.Name + ") へのメモ"
+		}
+		if r := v.vp[tabOutline].Current(); r != nil {
+			if ref, ok := r.Item.(outlineRowRef); ok && ref.Path != "" {
+				return fileMemo(ref.Path), ref.Path + " へのメモ"
+			}
+		}
+	case tabComments:
+		if r := v.vp[tabComments].Current(); r != nil {
+			if g, ok := r.Item.(cmtGroup); ok && g.Path != "" {
+				return fileMemo(g.Path), g.Path + " へのメモ"
+			}
+		}
+		if t, ok := v.currentThread(); ok && t.Root.Inline != nil {
+			in := t.Root.Inline
+			return memoFromAnchor(d.files, in), in.Path + " " + anchorLabel(in) + " へのメモ"
+		}
+	}
+	return newPRMemo(""), "PR全体へのメモ"
+}
+
+// openMemoInDiff pushes the built-in diff view scrolled to the memo's
+// anchor line (Enter on the Memo tab).
+func (v *detailView) openMemoInDiff(a *app, id int64) {
+	m := a.memosFor(v.prID).byID(id)
+	if m == nil {
+		return
+	}
+	if m.Path == "" {
+		a.status = "PR全体メモにはジャンプ先がありません"
+		return
+	}
+	d := a.detailFor(v.prID)
+	idx := -1
+	for i := range d.diffstat {
+		if d.diffstat[i].Path() == m.Path || d.diffstat[i].OldPath() == m.Path {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		a.status = "diff にファイルが見つかりません: " + m.Path
+		return
+	}
+	dv := newDiffView(a, v.prID, idx)
+	switch {
+	case len(m.NewRange) > 0:
+		dv.pendingLine = m.NewRange[0]
+	case len(m.OldRange) > 0:
+		dv.pendingLine = m.OldRange[0]
+		dv.pendingOldLine = true
+	}
+	a.push(dv)
 }
 
 func (v *detailView) overviewRows(a *app, d *prDetail) []Row {
@@ -855,11 +1035,22 @@ func (v *detailView) render(a *app, s *Screen) {
 			commentsCount = fmt.Sprintf("%d/%d", commentThreadCount(v.visibleComments(d)), total)
 		}
 	}
+	// The memo count is local (no loading state); an empty store shows no
+	// badge at all — "(0)" would just be noise.
+	memoLabel := "5:Memo"
+	if memoTotal := len(a.memosFor(v.prID).memos); memoTotal > 0 {
+		if v.search[tabMemo].query() != "" {
+			memoLabel += fmt.Sprintf(" (%d/%d)", v.shownMemos, memoTotal)
+		} else {
+			memoLabel += fmt.Sprintf(" (%d)", memoTotal)
+		}
+	}
 	labels := []string{
 		"1:Overview",
 		"2:Outline",
 		"3:Files (" + filesCount + ")",
 		"4:Comments (" + commentsCount + ")",
+		memoLabel,
 	}
 	x := 1
 	for i, l := range labels {
@@ -991,6 +1182,9 @@ func (v *detailView) handle(a *app, k Key) {
 	case isKey(k, '4'):
 		v.tab = tabComments
 		v.rebuild(a)
+	case isKey(k, '5'), isKey(k, 'M'):
+		v.tab = tabMemo
+		v.rebuild(a)
 	case isKey(k, 'j') || k.Kind == KeyDown:
 		if vp.Cursor >= 0 {
 			vp.MoveCursor(1)
@@ -1066,6 +1260,10 @@ func (v *detailView) handle(a *app, k Key) {
 					}
 				}
 			}
+		case tabMemo:
+			if id, ok := v.currentMemoID(); ok {
+				v.openMemoInDiff(a, id)
+			}
 		}
 	case isKey(k, 'v'):
 		// The built-in diff view (inline comments) stays reachable even
@@ -1093,6 +1291,18 @@ func (v *detailView) handle(a *app, k Key) {
 			openInBrowser(a, pr.WebURL())
 		}
 	case isKey(k, 'y'):
+		// On the Memo tab y exports every memo as Markdown for an AI agent
+		// prompt; elsewhere it keeps copying the PR URL.
+		if v.tab == tabMemo {
+			store := a.memosFor(v.prID)
+			if len(store.memos) == 0 {
+				a.status = "コピーするメモがありません"
+				return
+			}
+			d := a.detailFor(v.prID)
+			copyToClipboard(a, memosMarkdown(v.prID, v.displayPR(d), store.memos))
+			return
+		}
 		d := a.detailFor(v.prID)
 		if pr := v.displayPR(d); pr != nil {
 			copyToClipboard(a, pr.WebURL())
@@ -1120,6 +1330,29 @@ func (v *detailView) handle(a *app, k Key) {
 			target = replyTargetFor(c, t)
 		}
 		openCommentEditor(a, v.prID, nil, parent, target)
+	case isKey(k, 'm'):
+		v.composeMemo(a)
+	case isKey(k, 'd') && v.tab == tabMemo:
+		if id, ok := v.currentMemoID(); ok {
+			if m := a.memosFor(v.prID).byID(id); m != nil {
+				v.pendingAction = pendingDetailAction{
+					kind:   detailActionDeleteMemo,
+					memoID: id,
+					prompt: fmt.Sprintf("メモ「%s」を削除しますか？", truncateWidth(memoExcerpt(*m), 24)),
+				}
+			}
+		}
+	case isKey(k, 'e') && v.tab == tabMemo:
+		if id, ok := v.currentMemoID(); ok {
+			if m := a.memosFor(v.prID).byID(id); m != nil {
+				prID := v.prID
+				openMemoEditor(a, prID, m.Body, memoTarget(*m), func(a *app, body string) {
+					a.memosFor(prID).update(id, body)
+					a.status = "メモを更新しました"
+					rebuildMemoTab(a, prID)
+				})
+			}
+		}
 	case isKey(k, 'x') && v.tab == tabComments:
 		if c, _, ok := v.selectedComment(); ok {
 			if c.Deleted {
@@ -1181,6 +1414,11 @@ func (v *detailView) footer(a *app) string {
 		} else {
 			base += "Enter:diffツール  v:内蔵diff  "
 		}
+	}
+	if v.tab == tabMemo {
+		base += "Enter:コードへ  y:全メモをMDコピー  d:削除  e:編集  m:PR全体メモ  "
+	} else {
+		base += "m:メモ  "
 	}
 	cKey := "c:コメント"
 	if v.tab == tabComments {

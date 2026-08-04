@@ -122,27 +122,7 @@ func runCommentUI() {
 		errExit("missing comment context; launch me via the viewer")
 	}
 	cfg := loadConfig()
-
-	argv := cfg.CommentEditor
-	if len(argv) == 0 {
-		if ed := strings.Fields(os.Getenv("EDITOR")); len(ed) > 0 {
-			argv = ed
-		} else {
-			argv = []string{"nvim"}
-		}
-	}
-	argv, hasFile := expandArgv(argv, "{file}", file)
-	if !hasFile {
-		argv = append(argv, file)
-	}
-	if _, err := exec.LookPath(argv[0]); err != nil {
-		errExit("editor not found:", argv[0])
-	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		errExit("editor:", err)
-	}
+	runDraftEditor(cfg, file)
 
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -189,6 +169,32 @@ func runCommentUI() {
 	os.Remove(file)
 	fmt.Println("✓ 投稿しました")
 	time.Sleep(700 * time.Millisecond) // let the message register before the popup closes
+}
+
+// runDraftEditor opens the configured comment editor (falling back to
+// $EDITOR, then nvim) on a draft file, blocking until it exits. Shared by
+// the comment and memo pane entrypoints; failures exit the pane process.
+func runDraftEditor(cfg Config, file string) {
+	argv := cfg.CommentEditor
+	if len(argv) == 0 {
+		if ed := strings.Fields(os.Getenv("EDITOR")); len(ed) > 0 {
+			argv = ed
+		} else {
+			argv = []string{"nvim"}
+		}
+	}
+	argv, hasFile := expandArgv(argv, "{file}", file)
+	if !hasFile {
+		argv = append(argv, file)
+	}
+	if _, err := exec.LookPath(argv[0]); err != nil {
+		errExit("editor not found:", argv[0])
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		errExit("editor:", err)
+	}
 }
 
 // commentFail shows the post error full-screen (the draft survives on disk)

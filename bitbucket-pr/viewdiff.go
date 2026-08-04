@@ -494,6 +494,10 @@ func (v *diffView) handle(a *app, k Key) {
 		}
 	case isKey(k, 'c'):
 		v.composeComment(a)
+	case isKey(k, 'm'):
+		v.composeMemo(a)
+	case isKey(k, 'M'):
+		v.openMemoList(a)
 	case isKey(k, 'o'):
 		d := a.detailFor(v.prID)
 		if d.pr != nil {
@@ -561,6 +565,57 @@ func (v *diffView) composeComment(a *app) {
 	default:
 		a.status = "diff 行かコメントの上で C を押してください"
 	}
+}
+
+// composeMemo opens the memo editor anchored to the current context: the
+// v/V line selection, or the cursor's diff line. The anchor (with its diff
+// excerpt) is snapshotted now and captured in the onSave closure — the memo
+// lands in the store only when the editor saves a non-empty body.
+func (v *diffView) composeMemo(a *app) {
+	_, st, _ := v.fileDiff(a)
+	if st == nil {
+		return
+	}
+	lines := v.selectedLines()
+	if lines == nil {
+		r := v.vp.Current()
+		if r == nil || r.Kind != RowDiffLine {
+			a.status = "diff 行の上で m を押してください（v 選択でも可）"
+			return
+		}
+		l, ok := r.Item.(DiffLine)
+		if !ok {
+			return
+		}
+		lines = []DiffLine{l}
+	}
+	v.selAnchor = -1
+	memo := memoFromDiff(st.Path(), lines, "")
+	prID := v.prID
+	openMemoEditor(a, prID, "", st.Path()+" "+memo.lineLabel()+" へのメモ", func(a *app, body string) {
+		memo.Body = body
+		store := a.memosFor(prID)
+		store.add(memo)
+		a.status = fmt.Sprintf("メモを追加しました (%d件 — M:一覧)", len(store.memos))
+		rebuildMemoTab(a, prID)
+	})
+}
+
+// openMemoList jumps back to the detail view's Memo tab (the diff always
+// sits above its own detail view; the fallback covers a bare stack).
+func (v *diffView) openMemoList(a *app) {
+	for i := len(a.stack) - 1; i >= 0; i-- {
+		if dv, ok := a.stack[i].(*detailView); ok && dv.prID == v.prID {
+			a.stack = a.stack[:i+1]
+			dv.tab = tabMemo
+			dv.rebuild(a)
+			return
+		}
+	}
+	dv := newDetailView(a, v.prID, nil)
+	dv.tab = tabMemo
+	dv.rebuild(a)
+	a.push(dv)
 }
 
 // rangeAnchor maps selected diff lines onto a Bitbucket inline anchor. New
@@ -663,7 +718,7 @@ func (v *diffView) footer(a *app) string {
 				label = "選択中 " + anchorLabel(in)
 			}
 		}
-		return label + "  j/k:範囲変更  c:コメント  v/Esc:解除"
+		return label + "  j/k:範囲変更  c:コメント  m:メモ  v/Esc:解除"
 	}
 	cKey := "c:コメント"
 	if r := v.vp.Current(); r != nil && r.Kind == RowComment {
@@ -673,5 +728,5 @@ func (v *diffView) footer(a *app) string {
 			}
 		}
 	}
-	return "j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za:折畳  w:折返し  v:選択  C:💬  " + cKey + "  D:diffツール  q:戻る"
+	return "j/k:移動  ]h/[h:hunk  ]f/[f:ファイル  za:折畳  w:折返し  v:選択  C:💬  " + cKey + "  m:メモ  D:diffツール  q:戻る"
 }

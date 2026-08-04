@@ -15,13 +15,15 @@ const (
 	detailActionApprove
 	detailActionUnapprove
 	detailActionDecline
-	detailActionClone // Outline tab: clone the repo to enable analysis
-	detailActionFetch // Outline tab: fetch the PR's branches into the checkout
+	detailActionClone      // Outline tab: clone the repo to enable analysis
+	detailActionFetch      // Outline tab: fetch the PR's branches into the checkout
+	detailActionDeleteMemo // Memo tab: delete the memo under the cursor
 )
 
 type pendingDetailAction struct {
 	kind      detailActionKind
 	commentID int
+	memoID    int64
 	prompt    string
 }
 
@@ -39,6 +41,8 @@ func (k detailActionKind) name() string {
 		return "clone"
 	case detailActionFetch:
 		return "fetch"
+	case detailActionDeleteMemo:
+		return "メモ削除"
 	default:
 		return "操作"
 	}
@@ -109,6 +113,11 @@ func (v *detailView) handlePendingAction(a *app, k Key) {
 		v.runOutlineClone(a)
 	case detailActionFetch:
 		v.runOutlineFetch(a)
+	case detailActionDeleteMemo:
+		if a.memosFor(v.prID).delete(pending.memoID) {
+			a.status = "メモを削除しました"
+			v.rebuild(a)
+		}
 	}
 }
 
