@@ -1,51 +1,151 @@
 # bitbucket-pr — Bitbucket PR Viewer
 
 Bitbucket Cloud のプルリクエストを herdr のペイン内で閲覧・レビューするビューアです。
-PR 一覧 → 詳細（説明・変更シンボル・レビュアー・変更ファイル・コメント）→ hunk 単位の diff（インラインコメント付き）
-の閲覧に加え、`c` キーでコード行へのインラインコメント・返信・PRコメントを投稿できます
-（本文はいつものエディタが popup で開きます）。PR詳細では承認・承認取消・Declineも行えます。
+PR 一覧 → 詳細（説明・変更シンボル・レビュアー・変更ファイル・コメント）→ hunk 単位の diff の閲覧に加え、
+インラインコメント・返信・PRコメントの投稿、承認・承認取消・Decline も行えます。
 merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
 - version: `0.27.0`
 - platforms: macOS / Linux
 
-Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
-（デフォルト: [hunk](https://github.com/modem-dev/hunk)、config で任意ツールに変更可）の
-**ポップアップ**（95%×95%、`difftool_placement` で tab/overlay/split にも変更可）で開き、
-**選択したファイルが先頭に表示**されます。q でツールを閉じればすぐビューアに戻れます。
-インラインコメントを diff 行に埋め込み表示する**内蔵ビューア**（`v` キー）も併用でき、
-Comments タブのインラインコメントで Enter するとコード文脈へジャンプします。
-Kitty graphics 対応環境では、PR 投稿者・レビューアと表示中のコメント投稿者・返信者の
-アバターもユーザー名の横に表示します。承認済みレビューアには画像右下のチェックで状態を示します。
+はじめに読むもの: [セットアップ](#セットアップ) → [画面と機能](#画面と機能) → [キーバインド](#キーバインドビューア内-でその画面で使えるキーを表示) → [設定リファレンス](#設定リファレンスconfigtoml全項目省略可)
 
-hunk とは双方向に連携します（hunk 0.13 以上）:
+## セットアップ
 
-- **既存コメントの表示** — PR のインラインコメント（返信含む）が hunk の diff 内に
-  注釈として表示されます。hunk の Next/Previous Comment ショートカットで注釈間を移動できます。
-- **Draft note の投稿 / メモ取込** — hunk 内で `+`（または `c`）で入力した draft note は、
-  hunk を閉じたときに一覧確認画面が出て、`y` で Bitbucket のインラインコメントとして
-  一括投稿、`m` で**ローカルのレビューメモとして取込**（ビューアの Memo タブに反映、
-  投稿されない）、`n` で破棄です。投稿後はビューアの Comments に自動反映されます。
-  注意: hunk の note は単一行のみです（hunk の仕様。`c` は選択中 hunk の最初の変更行に、
-  マウスの `+` はその行に付きます）。**複数行コメントは内蔵ビューアの `v` 選択**で投稿できます。
+### 1. 必要環境
 
-## 画面
+- Herdr 0.7.0 以上
+- macOS または Linux
+- Go 1.26.4 以上（インストール時の plugin build に使用）
+- C コンパイラ（Tree-sitter grammar のビルドに使用。macOS は Xcode Command Line Tools、
+  Linux は clang または gcc）
+- Bitbucket Cloud の API トークン（後述）
+- （任意）[hunk](https://github.com/modem-dev/hunk) — デフォルトの外部 diff ビューア。
+  `brew install hunk` または `npm i -g hunkdiff`。**config.toml を作らなくても
+  Files タブの Enter はデフォルトで hunk を起動します**（`diff_tool` 設定で別ツールに変更可）。
+  未インストールの場合はインストール手順の案内画面が出るだけで、
+  内蔵ビューア（`v`）だけでも一通り使えます。コメント連携（注釈表示 / draft note 投稿）には
+  hunk 0.13 以上が必要です
+- （任意）アバター表示には Herdr 0.7.4 以上と Kitty graphics 対応ターミナルが必要です
+  → [アバター表示](#アバター表示任意)
 
-PR 一覧:
+### 2. インストール
 
-```text
- Bitbucket PRs — myworkspace/my-app   OPEN  MERGED  DECLINED  12件
-──────────────────────────────────────────────────────────────────────
- #482   feat: 経路検索のキャッシュ層を追加       A: [画像] kayashima       2時間前  💬 4
-        feature/route-cache → develop          R: [画像✓][画像 ] +2
- #479   fix: null チェック漏れ                     A: [画像] tanaka          1日前
-        fix/null-check → develop                R: [画像 ]
-──────────────────────────────────────────────────────────────────────
- j/k:移動  Enter:開く  Tab/s:state切替  /:絞り込み  y:URL  b:ブランチ  r:再読込  q:終了
+```sh
+herdr plugin install boooowy/herdr_plugins/bitbucket-pr
 ```
 
-Review Outline（詳細の `2:Outline`）:
+ローカル開発では:
+
+```sh
+cd bitbucket-pr && make plugin-link
+```
+
+### 3. 認証設定
+
+次の環境変数を読みます。
+
+```sh
+export ATLASSIAN_USER_ID="<Atlassianアカウントのメールアドレス>"
+export ATLASSIAN_API_TOKEN="<APIトークン>"
+```
+
+API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens> で作成します
+（App Password は 2026年6月に廃止済みのため使えません）。
+**コメント投稿・resolve・承認・承認取消・Declineを使う場合は、トークンに
+pullrequest への write スコープが必要です**
+（閲覧だけなら read で十分）。
+
+環境変数の代わりに `~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml` に
+`email` / `api_token` を書くこともできます（そちらが優先）。
+
+組織内限定のプロフィール画像も表示したい場合は Jira 用の認証も設定します
+→ [アバター表示](#アバター表示任意)。
+
+### 4. 起動方法を選ぶ
+
+主な使い方は次の2パターンです。どちらも herdr 側のキーバインド1つで起動でき、
+併用もできます（設定は herdr の再起動、または `herdr server reload-config` で反映）。
+
+#### パターンA: アクティブなペインのリポジトリのPRを開く
+
+作業中のリポジトリのPRをすぐ見たいとき。`~/.config/herdr/config.toml` に:
+
+```toml
+[[keys.command]]
+key = "cmd+alt+9"
+type = "plugin_action"
+command = "boooowy.bitbucket-pr.open"
+description = "Bitbucket PR: open viewer for current repo"
+```
+
+- フォーカス中ペインの作業ディレクトリ （フォアグラウンドプロセスの cwd → ペインの cwd の順に試行）の `git remote origin` から リポジトリを自動判別し、PR 一覧を新しいタブで開きます
+- 判別できないペインからも起動したい場合のフォールバック（任意）:
+
+  ```toml
+  # ~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml
+  default_workspace = "myworkspace"   # 環境変数 BITBUCKET_WORKSPACE でも可
+  default_repo = "my-app"             # 2つ揃って初めてフォールバックが効きます
+  ```
+
+  `default_repo` が無く workspace だけ分かる場合は、自動でパターンBのピッカーへ
+  フォールバックします
+
+- Outline タブだけはローカル checkout が必要です
+  → [Review Outline の利用条件とキャッシュ](#review-outline-の利用条件とキャッシュ)
+
+#### パターンB: リポジトリ一覧 → PR一覧
+
+workspace 内のリポジトリを横断して選びたいとき、ローカルに clone していない
+リポジトリのPRを見たいとき。
+
+```toml
+[[keys.command]]
+key = "cmd+alt+0"
+type = "plugin_action"
+command = "boooowy.bitbucket-pr.open-picker"
+description = "Bitbucket PR: pick a repository"
+```
+
+- workspace のリポジトリ一覧（更新順）を検索して選び、そのままPR一覧へ進みます。
+  ローカル checkout が無いリポジトリのPRも閲覧できます（Outline のみ不可）
+- **workspace の特定が必須です。** bitbucket.org のリポジトリ内のペインから起動すれば
+  自動判別されますが、それ以外の場所から起動するなら設定が必要です
+  （未設定だと「workspaceを特定できません」のトーストで終了します）:
+
+  ```toml
+  # ~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml
+  default_workspace = "myworkspace"   # 環境変数 BITBUCKET_WORKSPACE でも可
+  ```
+
+- ローカル checkout の有無表示（`●`）と `C` の clone を使う場合（任意）:
+
+  ```toml
+  repo_roots = ["~/Documents/workspace"]  # ローカルcheckoutの探索ルート
+  clone_dir = ""                          # C の clone 先。未設定なら repo_roots の先頭
+  clone_protocol = "ssh"                  # ssh | https
+  ```
+
+- 画面例・`●`/`◌` マークの意味・検索・clone の挙動 → [リポジトリピッカー](#リポジトリピッカー)
+
+#### その他の起動方法
+
+- **PR URL を Ctrl+クリック** — ターミナルに流れた
+  `https://bitbucket.org/<ws>/<repo>/pull-requests/<id>` を Ctrl+クリックすると、
+  その PR の詳細を直接開きます（設定不要）。
+- **CLI から実行** — キーバインドを設定していないときや動作確認に:
+
+  ```sh
+  herdr plugin action invoke open --plugin boooowy.bitbucket-pr
+  herdr plugin action invoke open-picker --plugin boooowy.bitbucket-pr
+  ```
+
+## 画面と機能
+
+### Review Outline
+
+詳細の `2:Outline` タブ:
 
 ```text
  #482 feat: route cache                         OPEN
@@ -86,7 +186,9 @@ Outline は Tree-sitter で変更シンボルと1-hopの caller/callee を抽出
 型定義（struct/class 等）とテストコードは、正当に大きくなりやすいためスメル判定の対象外です。
 判定根拠と望ましい対処は右側プレビューに日本語で表示されます。
 
-diff ビュー（hunk 単位・インラインコメント埋め込み）:
+### diff ビューと外部 diff ツール連携
+
+内蔵 diff ビュー（`v` キー・hunk 単位・インラインコメント埋め込み）:
 
 ```text
  src/cache/route_cache.go        +120 -8  [3/8 files]  #482
@@ -106,6 +208,23 @@ diff ビュー（hunk 単位・インラインコメント埋め込み）:
 
 PR 更新後に位置がずれたコメント（outdated）は捨てずに、各ファイル末尾の
 「Orphaned comments」セクションにまとめて表示します。
+Comments タブのインラインコメントで Enter するとコード文脈へジャンプします。
+
+Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
+（デフォルト: [hunk](https://github.com/modem-dev/hunk)、config で任意ツールに変更可）の
+**ポップアップ**（95%×95%、`difftool_placement` で tab/overlay/split にも変更可）で開き、
+**選択したファイルが先頭に表示**されます。q でツールを閉じればすぐビューアに戻れます。
+
+hunk とは双方向に連携します（hunk 0.13 以上）:
+
+- **既存コメントの表示** — PR のインラインコメント（返信含む）が hunk の diff 内に
+  注釈として表示されます。hunk の Next/Previous Comment ショートカットで注釈間を移動できます。
+- **Draft note の投稿 / メモ取込** — hunk 内で `+`（または `c`）で入力した draft note は、
+  hunk を閉じたときに一覧確認画面が出て、`y` で Bitbucket のインラインコメントとして
+  一括投稿、`m` で**ローカルのレビューメモとして取込**（ビューアの Memo タブに反映、
+  投稿されない）、`n` で破棄です。投稿後はビューアの Comments に自動反映されます。
+  注意: hunk の note は単一行のみです（hunk の仕様。`c` は選択中 hunk の最初の変更行に、
+  マウスの `+` はその行に付きます）。**複数行コメントは内蔵ビューアの `v` 選択**で投稿できます。
 
 ### レビューメモ（annotation → コーディングエージェントへ）
 
@@ -131,6 +250,7 @@ annotation 機能を参考にしています）。メモは Bitbucket には投�
 # PR #123 Fix config loading (feat/config → main) レビューメモ
 
 ### src/foo.go L42
+
 引数名を cfg → opts に直したい
 
 ```diff
@@ -138,133 +258,12 @@ annotation 機能を参考にしています）。メモは Bitbucket には投�
 ```
 
 ### (PR全体)
+
 テスト追加を依頼したい
 ````
 
 メモは PR ごとに state ディレクトリの JSON に永続化され、ビューアを閉じても
 `r` 再読込しても残ります（消えるのは `d` 削除時のみ）。
-
-## 必要環境
-
-- Herdr 0.7.0 以上
-- macOS または Linux
-- Go 1.26.4 以上（インストール時の plugin build に使用）
-- C コンパイラ（Tree-sitter grammar のビルドに使用。macOS は Xcode Command Line Tools、
-  Linux は clang または gcc）
-- Bitbucket Cloud の API トークン（後述）
-- （任意）[hunk](https://github.com/modem-dev/hunk) — デフォルトの外部 diff ビューア。
-  `brew install hunk` または `npm i -g hunkdiff`。**config.toml を作らなくても
-  Files タブの Enter はデフォルトで hunk を起動します**（`diff_tool` 設定で別ツールに変更可）。
-  未インストールの場合はインストール手順の案内画面が出るだけで、
-  内蔵ビューア（`v`）だけでも一通り使えます。コメント連携（注釈表示 / draft note 投稿）には
-  hunk 0.13 以上が必要です
-
-### アバター表示（任意）
-
-アバター表示には Herdr 0.7.4 以上と、Ghostty・kitty・WezTerm など
-Kitty graphics protocol 対応ターミナルが必要です。`~/.config/herdr/config.toml` で
-Herdr の graphics layer を有効にしてください。
-
-```toml
-[experimental]
-kitty_graphics = true
-```
-
-設定後、Herdr を再起動するか `herdr server reload-config` を実行します。
-PR 一覧では画面内に表示中の全PRについて投稿者と最大4人のレビューア、詳細ヘッダーでは
-PR 投稿者、Comments と内蔵 diff では画面内に表示中のルートコメント・返信の全ユーザーが
-対象です。一覧の投稿者とレビューアは固定列で左揃えし、タイトル・ブランチ列は最大64セルです。
-レビューアが5人以上なら `+N` で省略数を表示し、狭い画面ではタイトル列、レビューア画像数の
-順に縮めます。Overview のレビューアは承認済み・変更要求・未対応の順に画像付きで縦表示します。
-画像APIや画像取得が利用できない場合も、名前と状態の文字表示は残ります。
-
-Atlassian のプロフィール画像が「組織内のみ」公開の場合、Bitbucket REST API は
-実画像ではなくイニシャル画像を返します。後述の Jira 認証が設定されていれば、同じ
-`account_id` を Jira の安定版 User API で照会し、組織内の実画像を表示します。
-Jira 認証が未設定または取得に失敗した場合は、従来どおりBitbucketのイニシャル画像を表示します。
-
-特定ユーザーをローカル画像へ差し替える `avatar_overrides` も最優先で利用できます。
-画像は PNG / JPEG / GIF / WebP、2 MB 以下、縦横 2048 px 以下にしてください。
-
-## インストール
-
-```sh
-herdr plugin install boooowy/herdr_plugins/bitbucket-pr
-```
-
-ローカル開発では:
-
-```sh
-cd bitbucket-pr && make plugin-link
-```
-
-## 認証設定
-
-次の環境変数を読みます（他ツールと共用している場合は追加設定不要）:
-
-```sh
-export ATLASSIAN_USER_ID="<Atlassianアカウントのメールアドレス>"
-export ATLASSIAN_API_TOKEN="<APIトークン>"
-```
-
-API トークンは <https://id.atlassian.com/manage-profile/security/api-tokens> で作成します
-（App Password は 2026年6月に廃止済みのため使えません）。
-**コメント投稿・resolve・承認・承認取消・Declineを使う場合は、トークンに
-pullrequest への write スコープが必要です**
-（閲覧だけなら read で十分）。
-
-環境変数の代わりに `~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml` に
-`email` / `api_token` を書くこともできます（そちらが優先）。
-
-組織内限定のプロフィール画像も表示する場合は、Jira用の認証を設定します。
-
-```sh
-export JIRA_URL="https://your-company.atlassian.net"
-export JIRA_USERNAME="<Atlassianアカウントのメールアドレス>"
-export JIRA_API_TOKEN="<Jiraスコープを持つAPIトークン>"
-```
-
-3変数がすべて設定されている場合だけ `GET /rest/api/3/user/bulk` を使用し、画面内で
-未解決のユーザーを最大10人ずつまとめて照会します。
-いずれかが未設定ならJira APIは呼び出しません。Bitbucket用の
-`ATLASSIAN_API_TOKEN`はJira認証には流用しません。
-
-## 使い方
-
-起動方法は4つ:
-
-1. **キーバインド（推奨）** — `~/.config/herdr/config.toml` に例えば:
-
-```toml
-[[keys.command]]
-key = "cmd+alt+9"                # 配列も可: ["prefix+p", "cmd+alt+9"]
-type = "plugin_action"           # shell/pane/popup では動きません
-command = "boooowy.bitbucket-pr.open"
-description = "Bitbucket PR: open viewer for current repo"
-```
-
-   設定は herdr の再起動、または `herdr server reload-config` で反映されます。
-   フォーカス中ペインの作業ディレクトリの `git remote origin` からリポジトリを自動判別し、
-   PR 一覧を新しいタブで開きます。
-
-2. **リポジトリピッカー** — `boooowy.bitbucket-pr.open-picker` を
-   キーバインドすると、workspace のリポジトリ一覧（更新順）を検索して選ぶ画面から
-   起動できます。ローカル checkout が無い
-   リポジトリの PR もそのまま閲覧でき（Outline のみ不可）、`C` で選択制の
-   `git clone` もできます。詳細は「リポジトリピッカー」節を参照。
-   通常の `open` でリポジトリを判別できなかったときも、workspace が分かれば
-   自動的にこのピッカーへフォールバックします。
-
-3. **PR URL を Ctrl+クリック** — ターミナルに流れた
-   `https://bitbucket.org/<ws>/<repo>/pull-requests/<id>` を Ctrl+クリックすると、
-   その PR の詳細を直接開きます。
-
-4. **CLI から実行** — キーバインドを設定していないときや動作確認に:
-
-```sh
-herdr plugin action invoke open --plugin boooowy.bitbucket-pr
-herdr plugin action invoke open-picker --plugin boooowy.bitbucket-pr
-```
 
 ### リポジトリピッカー
 
@@ -313,7 +312,8 @@ checkout が関連付いていない場合でも、プラグインが学習し�
 clone と同じ動作・同じ設定を使います）。
 
 commitが無い場合、プラグインはfetchを自動実行しません。表示されたリポジトリで
-PRブランチをfetchしてから `r` で再読込してください。Outlineだけが利用不可になり、Overview、
+PRブランチをfetchしてから `r` で再読込してください（Outline タブの `F` → `y` でも
+不足commitのfetchができます）。Outlineだけが利用不可になり、Overview、
 Files、Commentsは通常どおり利用できます。
 
 解析はOutlineを初めて開いた時だけ非同期で実行します。結果はsource/destination commitの組を
@@ -327,41 +327,85 @@ Files、Commentsは通常どおり利用できます。
 `eval`、動的な`source`は対象外です。未対応言語、生成物、バイナリはスキップ理由を表示し、
 Filesタブで引き続き確認できます。
 
+### アバター表示（任意）
+
+Kitty graphics 対応環境では、PR 投稿者・レビューアと表示中のコメント投稿者・返信者の
+アバターもユーザー名の横に表示します。承認済みレビューアには画像右下のチェックで状態を示します。
+
+アバター表示には Herdr 0.7.4 以上と、Ghostty・kitty・WezTerm など
+Kitty graphics protocol 対応ターミナルが必要です。`~/.config/herdr/config.toml` で
+Herdr の graphics layer を有効にしてください。
+
+```toml
+[experimental]
+kitty_graphics = true
+```
+
+設定後、Herdr を再起動するか `herdr server reload-config` を実行します。
+PR 一覧では画面内に表示中の全PRについて投稿者と最大4人のレビューア、詳細ヘッダーでは
+PR 投稿者、Comments と内蔵 diff では画面内に表示中のルートコメント・返信の全ユーザーが
+対象です。一覧の投稿者とレビューアは固定列で左揃えし、タイトル・ブランチ列は最大64セルです。
+レビューアが5人以上なら `+N` で省略数を表示し、狭い画面ではタイトル列、レビューア画像数の
+順に縮めます。Overview のレビューアは承認済み・変更要求・未対応の順に画像付きで縦表示します。
+画像APIや画像取得が利用できない場合も、名前と状態の文字表示は残ります。
+
+Atlassian のプロフィール画像が「組織内のみ」公開の場合、Bitbucket REST API は
+実画像ではなくイニシャル画像を返します。次の Jira 認証が設定されていれば、同じ
+`account_id` を Jira の安定版 User API で照会し、組織内の実画像を表示します。
+
+```sh
+export JIRA_URL="https://your-company.atlassian.net"
+export JIRA_USERNAME="<Atlassianアカウントのメールアドレス>"
+export JIRA_API_TOKEN="<Jiraスコープを持つAPIトークン>"
+```
+
+3変数がすべて設定されている場合だけ `GET /rest/api/3/user/bulk` を使用し、画面内で
+未解決のユーザーを最大10人ずつまとめて照会します。
+いずれかが未設定ならJira APIは呼び出しません。Jira 認証が未設定または取得に失敗した場合は、
+従来どおりBitbucketのイニシャル画像を表示します。Bitbucket用の
+`ATLASSIAN_API_TOKEN`はJira認証には流用しません。
+
+特定ユーザーをローカル画像へ差し替える `avatar_overrides` も最優先で利用できます。
+画像は PNG / JPEG / GIF / WebP、2 MB 以下、縦横 2048 px 以下にしてください。
+
 ## キーバインド（ビューア内。`?` でその画面で使えるキーを表示）
 
-| キー                                                   | 動作                                                                                                                                                                                                                                                                                                 |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `j` / `k` / `↑` / `↓`                                  | 移動                                                                                                                                                                                                                                                                                                 |
-| `Ctrl-d` / `Ctrl-u`, `Ctrl-f` / `Ctrl-b`               | スクロール（Outline / Comments タブでは `Ctrl-d`/`Ctrl-u` が右プレビューのスクロール）                                                                                                                                                                                                              |
-| `g` / `G`                                              | 先頭 / 末尾（Outlineでは `gg` が先頭）                                                                                                                                                                                                                                                               |
-| `Enter`                                                | 開く（一覧→詳細、Outlineのディレクトリ/ファイル/テスト→展開、Outlineのシンボル→**関連diff**、Files→**diffツール**、Comments・Memo→**コードへジャンプ**）/ 内蔵ビューアでは hunk 折畳トグル                                                                                                              |
-| `v`                                                    | Files タブ: 内蔵 diff ビューアで開く / 内蔵ビューア内: **行選択の開始・解除**（`j`/`k` で範囲を伸ばし `c` で複数行コメント。`Esc` でも解除）                                                                                                                                                         |
-| `Tab` / `Shift-Tab` / `1`-`5` / `l` / `h`（`→` / `←`） | 詳細タブ切替（Overview / Outline / Files / Comments / Memo）                                                                                                                                                                                                                                         |
-| `s` / `Tab` / `l` / `h`（`→` / `←`）                   | state フィルタ切替（OPEN / MERGED / DECLINED / SUPERSEDED）（一覧）                                                                                                                                                                                                                                  |
+| キー                                                   | 動作                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `j` / `k` / `↑` / `↓`                                  | 移動                                                                                                                                                                                                                                                                                                          |
+| `Ctrl-d` / `Ctrl-u`, `Ctrl-f` / `Ctrl-b`               | スクロール（Outline / Comments タブでは `Ctrl-d`/`Ctrl-u` が右プレビューのスクロール）                                                                                                                                                                                                                        |
+| `g` / `G`                                              | 先頭 / 末尾（Outlineでは `gg` が先頭）                                                                                                                                                                                                                                                                        |
+| `Enter`                                                | 開く（一覧→詳細、Outlineのディレクトリ/ファイル/テスト→展開、Outlineのシンボル→**関連diff**、Files→**diffツール**、Comments・Memo→**コードへジャンプ**）/ 内蔵ビューアでは hunk 折畳トグル                                                                                                                    |
+| `v`                                                    | Files タブ: 内蔵 diff ビューアで開く / 内蔵ビューア内: **行選択の開始・解除**（`j`/`k` で範囲を伸ばし `c` で複数行コメント。`Esc` でも解除）                                                                                                                                                                  |
+| `Tab` / `Shift-Tab` / `1`-`5` / `l` / `h`（`→` / `←`） | 詳細タブ切替（Overview / Outline / Files / Comments / Memo）                                                                                                                                                                                                                                                  |
+| `s` / `Tab` / `l` / `h`（`→` / `←`）                   | state フィルタ切替（OPEN / MERGED / DECLINED / SUPERSEDED）（一覧）                                                                                                                                                                                                                                           |
 | `/`                                                    | **絞り込み** — 一覧: 番号・タイトル・著者・ブランチ名 / Outline: シンボル・kind・シグネチャ・ファイルパス / Files: ファイルパス / Comments: コメント本文・著者・ファイルパス・行番号 / Memo: 本文・ファイルパス。入力しながら即座に絞り込み、`Enter` で確定、`Esc`（または `q`）で解除。空白区切りは AND 検索 |
-| `gd` / `gr`                                            | Outline: 選択シンボルの変更済み callee / caller へ移動。候補が複数なら選択画面を開き、PR外参照は場所をステータス表示                                                                                                                                                                                   |
-| `Ctrl-o` / `Ctrl-i`                                    | Outline: シンボル移動履歴を戻る / 進む                                                                                                                                                                                                                                                               |
-| `O`                                                    | Outline: ディレクトリの依存順 / アルファベット順を切替                                                                                                                                                                                                                                              |
-| `]h` / `[h`                                            | 次 / 前の hunk（内蔵ビューア）                                                                                                                                                                                                                                                                       |
-| `]f` / `[f`（`→` / `←`）                               | 次 / 前のファイル（内蔵ビューア）                                                                                                                                                                                                                                                                    |
-| `za` / `zA`                                            | hunk 折畳 / 全折畳（内蔵ビューア）                                                                                                                                                                                                                                                                   |
-| `w`                                                    | 長い行の折返し切替（内蔵ビューア）                                                                                                                                                                                                                                                                   |
-| `c`                                                    | **コメント投稿** — diff 行:インラインコメント / `v` 選択中:**複数行コメント** / コメント上:返信（Comments タブの返信行では**入れ子返信**） / それ以外:PRコメント。投稿先はフッタに「c:返信→著者 L15」等で常に表示。エディタが popup で開き、保存して閉じると投稿（空なら中止）。**画面には自動反映** |
-| `C`                                                    | インラインコメント表示切替（内蔵ビューア） / **clone**（リポジトリピッカー、および checkout 未関連付け時の Outline タブ。`y` で確定）                                                                                                                                                                 |
-| `x`                                                    | Comments タブ: 選択コメントを**削除**（中央の確認画面で `y` を押す。返信付きコメントは Bitbucket 仕様でソフト削除）                                                                                                                                                                                 |
-| `s`                                                    | Comments タブ: スレッドを **resolve / 再オープン**（インラインスレッドのみ。返信行では**親スレッドに作用** — フッタに「s:親をresolve」と表示。解決済みは一覧に ✓・スレッドに [resolved] 表示）                                                                                                       |
-| `m` / `M`                                              | **レビューメモ** — 内蔵ビューア: カーソル行（`v` 選択中はその範囲）にメモを追加 / PR詳細: Files タブは選択ファイル、Outline タブは選択シンボルの定義行、Comments タブは選択スレッドの行、それ以外は PR 全体メモ。`M` で Memo タブへ。メモはローカル保存で Bitbucket には投稿されません                     |
-| `d` / `e`                                              | Memo タブ: メモを**削除**（`y` で確定）/ エディタで**再編集**                                                                                                                                                                                                                                        |
-| `a` / `A` / `X`                                        | PR詳細: **承認 / 自分の承認取消 / Decline**（OPENのPRのみ。すべて `y` で確定、他キーで取消）                                                                                                                                                                                                          |
-| `D`                                                    | PR 全体の diff を diff ツールで開く                                                                                                                                                                                                                                                                  |
-| `r`                                                    | 再読込（キャッシュ破棄）                                                                                                                                                                                                                                                                             |
-| `o`                                                    | ブラウザで開く                                                                                                                                                                                                                                                                                       |
-| `y`                                                    | PR URL をクリップボードにコピー（一覧 / 詳細）。Memo タブでは**全メモを Markdown でコピー**                                                                                                                                                                                                          |
-| `b`                                                    | source branch 名をクリップボードにコピー（一覧 / 詳細）                                                                                                                                                                                                                                              |
-| `?`                                                    | その画面のキーバインドを中央に表示。`j`/`k`・`Ctrl-d`/`Ctrl-u` でスクロール、`q`/`Esc`/`?` で閉じる                                                                                                                                                                                                  |
-| `q` / `Esc`                                            | 戻る / 終了                                                                                                                                                                                                                                                                                          |
+| `gd` / `gr`                                            | Outline: 選択シンボルの変更済み callee / caller へ移動。候補が複数なら選択画面を開き、PR外参照は場所をステータス表示                                                                                                                                                                                          |
+| `Ctrl-o` / `Ctrl-i`                                    | Outline: シンボル移動履歴を戻る / 進む                                                                                                                                                                                                                                                                        |
+| `O`                                                    | Outline: ディレクトリの依存順 / アルファベット順を切替                                                                                                                                                                                                                                                        |
+| `F`                                                    | Outline: 不足している PR の commit を fetch（`y` で確定）                                                                                                                                                                                                                                                     |
+| `]h` / `[h`                                            | 次 / 前の hunk（内蔵ビューア）                                                                                                                                                                                                                                                                                |
+| `]f` / `[f`（`→` / `←`）                               | 次 / 前のファイル（内蔵ビューア）                                                                                                                                                                                                                                                                             |
+| `za` / `zA`                                            | hunk 折畳 / 全折畳（内蔵ビューア）                                                                                                                                                                                                                                                                            |
+| `w`                                                    | 長い行の折返し切替（内蔵ビューア）                                                                                                                                                                                                                                                                            |
+| `c`                                                    | **コメント投稿** — diff 行:インラインコメント / `v` 選択中:**複数行コメント** / コメント上:返信（Comments タブの返信行では**入れ子返信**） / それ以外:PRコメント。投稿先はフッタに「c:返信→著者 L15」等で常に表示。エディタが popup で開き、保存して閉じると投稿（空なら中止）。**画面には自動反映**          |
+| `C`                                                    | インラインコメント表示切替（内蔵ビューア） / **clone**（リポジトリピッカー、および checkout 未関連付け時の Outline タブ。`y` で確定）                                                                                                                                                                         |
+| `x`                                                    | Comments タブ: 選択コメントを**削除**（中央の確認画面で `y` を押す。返信付きコメントは Bitbucket 仕様でソフト削除）                                                                                                                                                                                           |
+| `s`                                                    | Comments タブ: スレッドを **resolve / 再オープン**（インラインスレッドのみ。返信行では**親スレッドに作用** — フッタに「s:親をresolve」と表示。解決済みは一覧に ✓・スレッドに [resolved] 表示）                                                                                                                |
+| `m` / `M`                                              | **レビューメモ** — 内蔵ビューア: カーソル行（`v` 選択中はその範囲）にメモを追加 / PR詳細: Files タブは選択ファイル、Outline タブは選択シンボルの定義行、Comments タブは選択スレッドの行、それ以外は PR 全体メモ。`M` で Memo タブへ。メモはローカル保存で Bitbucket には投稿されません                        |
+| `d` / `e`                                              | Memo タブ: メモを**削除**（`y` で確定）/ エディタで**再編集**                                                                                                                                                                                                                                                 |
+| `a` / `A` / `X`                                        | PR詳細: **承認 / 自分の承認取消 / Decline**（OPENのPRのみ。すべて `y` で確定、他キーで取消）                                                                                                                                                                                                                  |
+| `D`                                                    | PR 全体の diff を diff ツールで開く                                                                                                                                                                                                                                                                           |
+| `r`                                                    | 再読込（キャッシュ破棄）                                                                                                                                                                                                                                                                                      |
+| `o`                                                    | ブラウザで開く                                                                                                                                                                                                                                                                                                |
+| `y`                                                    | PR URL をクリップボードにコピー（一覧 / 詳細）。Memo タブでは**全メモを Markdown でコピー**                                                                                                                                                                                                                   |
+| `b`                                                    | source branch 名をクリップボードにコピー（一覧 / 詳細）                                                                                                                                                                                                                                                       |
+| `?`                                                    | その画面のキーバインドを中央に表示。`j`/`k`・`Ctrl-d`/`Ctrl-u` でスクロール、`q`/`Esc`/`?` で閉じる                                                                                                                                                                                                           |
+| `q` / `Esc`                                            | 戻る / 終了                                                                                                                                                                                                                                                                                                   |
 
-## 設定（config.toml、全項目省略可）
+## 設定リファレンス（config.toml、全項目省略可）
+
+起動に最低限必要な設定は[セットアップ](#4-起動方法を選ぶ)を参照してください。ここは全項目の一覧です。
 
 設定ファイルは `~/.config/herdr/plugins/config/boooowy.bitbucket-pr/config.toml`。
 **ファイル自体が無くても、以下に示す値がそのままデフォルトとして使われて動作します**
@@ -373,6 +417,7 @@ email = ""
 api_token = ""
 
 default_workspace = ""   # git remote で判別できないときのフォールバック
+                         # （未設定なら環境変数 BITBUCKET_WORKSPACE）
 default_repo = ""
 default_state = "OPEN"   # 一覧の初期フィルタ
 
@@ -401,6 +446,7 @@ files_enter = "difftool"      # difftool | builtin — Files タブ Enter の動
 #   popup:   枠付きポップアップ。ツール終了（q）で自動的に閉じてビューアへ戻る
 #   overlay: タブ全面表示。終了時にフォーカスと zoom 状態を復元
 #   tab:     専用タブ。開いたまま保持でき、同じ PR のタブは再利用される
+#   split:   現在のタブを分割して表示
 difftool_placement = "popup"
 difftool_width = "95%"        # popup のみ有効（セル数 or "95%"）
 difftool_height = "95%"
