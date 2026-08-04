@@ -19,6 +19,7 @@ const (
 	RowOutlineDir                   // Outline directory (Item: outlineRowRef)
 	RowOutlineFile                  // Outline file/test group (Item: outlineRowRef)
 	RowOutlineSymbol                // Outline symbol (Item: outlineRowRef)
+	RowMemo                         // one review memo (Item: int64 memo ID)
 )
 
 // Span is one styled segment of a row, painted left to right.

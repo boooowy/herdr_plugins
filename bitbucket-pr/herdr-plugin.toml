@@ -42,6 +42,12 @@ title = "comment"
 placement = "tab"
 command = ["./bin/bitbucket-pr", "comment-ui"]
 
+[[panes]]
+id = "memo"
+title = "memo"
+placement = "tab"
+command = ["./bin/bitbucket-pr", "memo-ui"]
+
 [[link_handlers]]
 id = "pr-url"
 title = "Open in PR viewer"

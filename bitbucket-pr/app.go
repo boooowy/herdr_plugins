@@ -59,6 +59,7 @@ type app struct {
 	prsGen         int    // list generation; bumped on reload/state switch to drop stale pages
 	prsMoreLoading bool   // a loadMore page is in flight
 	detail         map[int]*prDetail
+	memos          map[int]*memoStore // PR id → its local review memos
 
 	// Repo picker state (picker mode only; mirrors the PR-list block above).
 	repos            []Repository
@@ -146,6 +147,7 @@ func resetRepoState(a *app) {
 	a.prsGen++
 	a.prsMoreLoading = false
 	a.detail = map[int]*prDetail{}
+	a.memos = map[int]*memoStore{}
 	a.difftoolPanes = map[int]paneRef{}
 	a.pendingDifftool = nil
 }
@@ -186,6 +188,21 @@ func (a *app) detailFor(id int) *prDetail {
 	return d
 }
 
+// memosFor returns (lazily loading from disk) the review-memo store for a
+// PR id. Unlike prDetail, the store survives a force reload — memos are
+// local data, not fetched state.
+func (a *app) memosFor(id int) *memoStore {
+	if a.memos == nil {
+		a.memos = map[int]*memoStore{}
+	}
+	s, ok := a.memos[id]
+	if !ok {
+		s = loadMemoStore(a.ctx.Workspace, a.ctx.Repo, id)
+		a.memos[id] = s
+	}
+	return s
+}
+
 // contentRect is the viewport area between the per-view header (2 rows) and
 // the footer (1 row).
 func (a *app) contentRect() Rect {
@@ -219,6 +236,7 @@ func runUI() {
 		h:             h,
 		resultCh:      make(chan func(*app), 8),
 		detail:        map[int]*prDetail{},
+		memos:         map[int]*memoStore{},
 		difftoolPanes: map[int]paneRef{},
 		localDirs:     loadRepoDirIndex(),
 		cloneInFlight: map[string]bool{},

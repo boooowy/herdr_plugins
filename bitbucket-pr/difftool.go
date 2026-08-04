@@ -24,6 +24,7 @@ const (
 	envHunkTitle  = "BITBUCKET_PR_DIFF_TITLE"
 	envDiffCtx    = "BITBUCKET_PR_DIFF_CTX"    // hunk --agent-context sidecar path
 	envDiffMarker = "BITBUCKET_PR_DIFF_MARKER" // touched after draft notes are posted
+	envMemoImport = "BITBUCKET_PR_MEMO_IMPORT" // notes JSON written when m picks memo import
 )
 
 // paneRef remembers the tab a PR's diff tool runs in, and which file the
@@ -62,12 +63,14 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		ctxPath = ""
 	}
 	marker := filepath.Join(stateDir(), fmt.Sprintf("dtpost-%d-%d", prID, time.Now().UnixNano()))
+	memoImport := filepath.Join(stateDir(), fmt.Sprintf("dtmemo-%d-%d.json", prID, time.Now().UnixNano()))
 
 	env := map[string]string{
 		envDiffFile:   path,
 		envHunkTitle:  diffTabTitle(a.cfg.DiffTabTitle, prID, d.pr, a.ctx.Repo),
 		envDiffCtx:    ctxPath,
 		envDiffMarker: marker,
+		envMemoImport: memoImport,
 		envWorkspace:  a.ctx.Workspace,
 		envRepo:       a.ctx.Repo,
 		envPRID:       strconv.Itoa(prID),
@@ -87,6 +90,7 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		}
 		debugf("difftool: opened %s for pr %d", placement, prID)
 		go watchPostMarker(a, prID, marker)
+		go watchMemoImport(a, prID, memoImport)
 		return
 	}
 
@@ -116,6 +120,7 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 	}
 	a.difftoolPanes[prID] = paneRef{PaneID: pane.PaneID, TabID: pane.TabID, Focus: focusPath}
 	go watchPostMarker(a, prID, marker)
+	go watchMemoImport(a, prID, memoImport)
 	title := diffTabTitle(a.cfg.DiffTabTitle, prID, d.pr, a.ctx.Repo)
 	if err := a.herdr.tabRename(pane.TabID, title); err != nil {
 		debugf("difftool: tab rename: %v", err)
@@ -316,6 +321,33 @@ func paintAndWaitKey(s *Screen, cfg Config) {
 		defer term.Restore(int(os.Stdin.Fd()), old)
 	}
 	newKeyReader(os.Stdin).Read()
+}
+
+// paintAndWaitChoice flushes a full-screen prompt and reads keys until one
+// of accept appears (returned as-is) or n/q/Esc/Ctrl-C (0).
+func paintAndWaitChoice(s *Screen, cfg Config, accept ...rune) rune {
+	out := bufio.NewWriter(os.Stdout)
+	s.Flush(out, sgrTable(cfg))
+	out.Flush()
+	if old, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
+		defer term.Restore(int(os.Stdin.Fd()), old)
+	}
+	kr := newKeyReader(os.Stdin)
+	for {
+		k, err := kr.Read()
+		if err != nil {
+			return 0
+		}
+		for _, r := range accept {
+			if isKey(k, r) {
+				return r
+			}
+		}
+		if isKey(k, 'n') || isKey(k, 'q') || k.Kind == KeyEsc ||
+			(k.Kind == KeyCtrl && k.R == 'c') {
+			return 0
+		}
+	}
 }
 
 // paintAndWaitYes flushes a full-screen prompt and reads keys until y
