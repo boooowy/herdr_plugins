@@ -50,6 +50,18 @@ func truncateWidth(s string, w int) string {
 	return runewidth.Truncate(s, w-1, "") + "…"
 }
 
+// truncateWidthLeft cuts s from the left so its display width fits w cells,
+// prefixing "…" when something was cut — for paths, where the tail matters.
+func truncateWidthLeft(s string, w int) string {
+	if runewidth.StringWidth(s) <= w {
+		return s
+	}
+	if w <= 1 {
+		return "…"
+	}
+	return "…" + runewidth.TruncateLeft(s, runewidth.StringWidth(s)-(w-1), "")
+}
+
 // wrapText soft-wraps s to the given display width, splitting long runs at
 // cell boundaries (CJK aware). Newlines in the input are preserved.
 func wrapText(s string, width int) []string {

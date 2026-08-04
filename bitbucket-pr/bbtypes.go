@@ -218,6 +218,40 @@ type CommentResolution struct {
 // Resolved reports whether the comment's thread is marked resolved.
 func (c *Comment) Resolved() bool { return c.Resolution != nil }
 
+// Repository is one entry from the workspace repository list, trimmed to
+// what the repo picker renders plus the clone URLs.
+type Repository struct {
+	Slug        string    `json:"slug"`
+	Name        string    `json:"name"`
+	FullName    string    `json:"full_name"` // "workspace/slug"
+	Description string    `json:"description"`
+	UpdatedOn   time.Time `json:"updated_on"`
+	Links       struct {
+		Clone []struct {
+			Name string `json:"name"` // "https" | "ssh"
+			Href string `json:"href"`
+		} `json:"clone"`
+		HTML struct {
+			Href string `json:"href"`
+		} `json:"html"`
+	} `json:"links"`
+}
+
+// CloneURL returns the clone URL for the given protocol ("ssh" | "https"),
+// or "" when the API did not provide one. Always taken from the payload —
+// never assembled locally, so credentials can never leak into it.
+func (r *Repository) CloneURL(protocol string) string {
+	for _, l := range r.Links.Clone {
+		if l.Name == protocol {
+			return l.Href
+		}
+	}
+	return ""
+}
+
+// WebURL returns the repository's browser URL.
+func (r *Repository) WebURL() string { return r.Links.HTML.Href }
+
 // page is one page of a Bitbucket paginated collection. Follow Next verbatim
 // (never construct page numbers); size/previous may be absent, so they are
 // not modeled at all.

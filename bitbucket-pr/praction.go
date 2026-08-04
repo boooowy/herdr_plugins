@@ -15,6 +15,8 @@ const (
 	detailActionApprove
 	detailActionUnapprove
 	detailActionDecline
+	detailActionClone // Outline tab: clone the repo to enable analysis
+	detailActionFetch // Outline tab: fetch the PR's branches into the checkout
 )
 
 type pendingDetailAction struct {
@@ -33,6 +35,10 @@ func (k detailActionKind) name() string {
 		return "承認取消"
 	case detailActionDecline:
 		return "Decline"
+	case detailActionClone:
+		return "clone"
+	case detailActionFetch:
+		return "fetch"
 	default:
 		return "操作"
 	}
@@ -99,6 +105,10 @@ func (v *detailView) handlePendingAction(a *app, k Key) {
 		})
 	case detailActionApprove, detailActionUnapprove, detailActionDecline:
 		v.runPRAction(a, pending.kind)
+	case detailActionClone:
+		v.runOutlineClone(a)
+	case detailActionFetch:
+		v.runOutlineFetch(a)
 	}
 }
 

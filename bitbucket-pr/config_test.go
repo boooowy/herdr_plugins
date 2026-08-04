@@ -108,3 +108,31 @@ func TestCredentialsResolution(t *testing.T) {
 		t.Error("missing credentials must report ok=false")
 	}
 }
+
+func TestNormalizeDirPathsExpandsHome(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	got := normalizeDirPaths([]string{"~/src", " ", "/abs/path", "rel"})
+	want := []string{filepath.Join(home, "src"), "/abs/path", filepath.Join(home, "rel")}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %s, want %s", i, got[i], want[i])
+		}
+	}
+}
+
+func TestCloneDirFallsBackToFirstRepoRoot(t *testing.T) {
+	cfg := Config{RepoRoots: []string{"/roots/a", "/roots/b"}}
+	if got := cfg.cloneDir(); got != "/roots/a" {
+		t.Errorf("cloneDir = %q, want first repo root", got)
+	}
+	cfg.CloneDir = "/explicit"
+	if got := cfg.cloneDir(); got != "/explicit" {
+		t.Errorf("cloneDir = %q, want explicit clone_dir", got)
+	}
+	if got := (Config{}).cloneDir(); got != "" {
+		t.Errorf("cloneDir = %q, want empty when unconfigured", got)
+	}
+}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -60,7 +62,21 @@ func (v *detailView) ensureOutline(a *app, d *prDetail) {
 	}
 	d.outlineStarted = true
 	if a.ctx.RepoDir == "" {
-		d.outlineErr = "ローカルcheckoutが関連付けられていません。対象リポジトリ内のペインからPRを開いてください。"
+		// The checkout index may know this repo even though the launch pane
+		// did not (URL click, default_repo, picker): associate it silently
+		// after confirming its origin still matches.
+		key := repoDirKey(a.ctx.Workspace, a.ctx.Repo)
+		if dir := a.localDirs[key]; dir != "" {
+			if ws, repo, err := repoFromDir(dir); err == nil && ws == a.ctx.Workspace && repo == a.ctx.Repo {
+				a.ctx.RepoDir = dir
+			} else {
+				forgetRepoDir(a.ctx.Workspace, a.ctx.Repo)
+				delete(a.localDirs, key)
+			}
+		}
+	}
+	if a.ctx.RepoDir == "" {
+		d.outlineErr = "ローカルcheckoutが関連付けられていません。\nC でclone、または対象リポジトリ内のペインからPRを開き直してください。"
 		return
 	}
 	sourceHash := d.pr.Source.Commit.Hash
@@ -89,23 +105,184 @@ func (v *detailView) ensureOutline(a *app, d *prDetail) {
 			}
 			current.outlineLoading = false
 			if analysisErr != nil {
-				current.outlineErr = outlineUserError(repoDir, sourceHash, destinationHash, analysisErr)
+				current.outlineErr, current.outlineFetchable = outlineUserError(repoDir, sourceHash, destinationHash, analysisErr)
 			} else {
 				current.outline = result
 				current.outlineErr = ""
+				current.outlineFetchable = false
 			}
 			v.rebuild(a)
 		}, nil
 	})
 }
 
-func outlineUserError(repoDir, sourceHash, destinationHash string, err error) string {
-	msg := err.Error()
-	if strings.Contains(msg, "がローカルにありません") {
-		return fmt.Sprintf("PRのcommitがローカルにありません。%s でPRブランチをfetchしてから r で再読込してください。 (%s → %s)",
-			repoDir, shortHash(destinationHash), shortHash(sourceHash))
+// beginOutlineClone opens the y/n confirmation for cloning the current repo
+// so Outline can run. Reached from the Outline tab's "no local checkout"
+// state (ensureOutline already consumed any known checkout in the index).
+func (v *detailView) beginOutlineClone(a *app) {
+	if v.pendingAction.kind != detailActionNone {
+		return
 	}
-	return "Outlineを解析できません: " + msg
+	ws, repo := a.ctx.Workspace, a.ctx.Repo
+	dest := cloneDestFor(a.cfg, repo)
+	if dest == "" {
+		a.status = "clone先が未設定です。config.toml の repo_roots か clone_dir を設定してください"
+		return
+	}
+	if a.cloneInFlight[ws+"/"+repo] {
+		a.status = "clone実行中です: " + ws + "/" + repo
+		return
+	}
+	v.pendingAction = pendingDetailAction{
+		kind:   detailActionClone,
+		prompt: fmt.Sprintf("%s/%s を %s にcloneしますか？", ws, repo, shortenHome(dest)),
+	}
+}
+
+// runOutlineClone resolves the repository's clone links (from the picker's
+// list when present, otherwise one API call) and clones it, then reruns the
+// Outline analysis against the fresh checkout.
+func (v *detailView) runOutlineClone(a *app) {
+	ws, repo := a.ctx.Workspace, a.ctx.Repo
+	for i := range a.repos {
+		if a.repos[i].Slug == repo {
+			v.cloneAndReanalyze(a, a.repos[i])
+			return
+		}
+	}
+	a.fetch("repo "+repo, func() (func(*app), error) {
+		r, err := a.client.getRepo(ws, repo)
+		return func(a *app) {
+			if err != nil {
+				a.status = "リポジトリ情報の取得に失敗: " + err.Error()
+				return
+			}
+			v.cloneAndReanalyze(a, *r)
+		}, nil
+	})
+}
+
+func (v *detailView) cloneAndReanalyze(a *app, r Repository) {
+	if msg := cloneBlocked(a, &r); msg != "" {
+		a.status = msg
+		return
+	}
+	startClone(a, r, func(a *app, dir string) {
+		if dir == "" {
+			return
+		}
+		a.ctx.RepoDir = dir
+		v.retryOutline(a)
+	})
+}
+
+// retryOutline drops the failed analysis state and reruns ensureOutline.
+func (v *detailView) retryOutline(a *app) {
+	d := a.detailFor(v.prID)
+	d.outlineStarted, d.outlineLoading = false, false
+	d.outlineErr = ""
+	d.outlineFetchable = false
+	d.outline = nil
+	v.ensureOutline(a, d)
+	v.rebuild(a)
+}
+
+// beginOutlineFetch opens the y/n confirmation for fetching the PR's branches
+// into the associated checkout. Reached from the Outline tab's "commit
+// missing locally" state (typically a stale clone whose destination branch
+// has since moved).
+func (v *detailView) beginOutlineFetch(a *app) {
+	if v.pendingAction.kind != detailActionNone {
+		return
+	}
+	d := a.detailFor(v.prID)
+	if !d.outlineFetchable || d.pr == nil || a.ctx.RepoDir == "" {
+		return
+	}
+	if a.fetchInFlight[a.ctx.RepoDir] {
+		a.status = "fetch実行中です: " + shortenHome(a.ctx.RepoDir)
+		return
+	}
+	v.pendingAction = pendingDetailAction{
+		kind:   detailActionFetch,
+		prompt: fmt.Sprintf("%s でoriginからPRのブランチをfetchしますか？", shortenHome(a.ctx.RepoDir)),
+	}
+}
+
+// runOutlineFetch fetches the PR's destination and source branches from
+// origin, then reruns the Outline analysis. Branches are fetched by name
+// (Bitbucket Cloud does not reliably serve want-by-SHA) and one at a time,
+// so a source branch origin doesn't have — fork PRs, deleted after merge —
+// cannot abort the destination update. The recheck after fetch reports any
+// still-missing commit honestly.
+func (v *detailView) runOutlineFetch(a *app) {
+	d := a.detailFor(v.prID)
+	repoDir := a.ctx.RepoDir
+	if d.pr == nil || repoDir == "" {
+		return
+	}
+	if a.fetchInFlight[repoDir] {
+		a.status = "fetch実行中です: " + shortenHome(repoDir)
+		return
+	}
+	var branches []string
+	for _, name := range []string{d.pr.Destination.Branch.Name, d.pr.Source.Branch.Name} {
+		if name != "" && (len(branches) == 0 || branches[0] != name) {
+			branches = append(branches, name)
+		}
+	}
+	if len(branches) == 0 {
+		a.status = "PRのブランチ名を取得できません"
+		return
+	}
+	a.fetchInFlight[repoDir] = true
+	a.fetch(fmt.Sprintf("outline fetch %d", v.prID), func() (func(*app), error) {
+		var fetched, failures []string
+		for _, branch := range branches {
+			cmd := exec.Command("git", "-C", repoDir, "fetch", "origin", branch)
+			// Never hang on an interactive credential prompt — fail fast and
+			// explain instead.
+			cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				failures = append(failures, branch+": "+lastOutputLine(out, err))
+				debugf("outline fetch %s %s: %v: %s", repoDir, branch, err, out)
+			} else {
+				fetched = append(fetched, branch)
+			}
+		}
+		return func(a *app) {
+			delete(a.fetchInFlight, repoDir)
+			if len(fetched) == 0 {
+				a.status = "fetchに失敗: " + strings.Join(failures, " / ")
+				return
+			}
+			if len(failures) > 0 {
+				a.status = "一部のブランチをfetchできませんでした: " + strings.Join(failures, " / ")
+			} else {
+				a.status = "fetchしました: origin " + strings.Join(fetched, " ")
+			}
+			v.retryOutline(a)
+		}, nil
+	})
+}
+
+// outlineUserError converts an analysis failure into the Outline tab's error
+// text. The bool reports whether F (fetch from origin) may resolve it — true
+// only for the missing-commit case.
+func outlineUserError(repoDir, sourceHash, destinationHash string, err error) (string, bool) {
+	msg := err.Error()
+	if !strings.Contains(msg, "がローカルにありません") {
+		return "Outlineを解析できません: " + msg, false
+	}
+	side, missing := "PRのcommit", ""
+	switch {
+	case destinationHash != "" && strings.Contains(msg, shortHash(destinationHash)):
+		side, missing = "マージ先ブランチのcommit", " "+shortHash(destinationHash)
+	case sourceHash != "" && strings.Contains(msg, shortHash(sourceHash)):
+		side, missing = "PRブランチのcommit", " "+shortHash(sourceHash)
+	}
+	return fmt.Sprintf("%s%s がローカルにありません。\nF でoriginからPRのブランチをfetchして再解析します（手動なら %s でfetchして r で再読込）。",
+		side, missing, shortenHome(repoDir)), true
 }
 
 func shortHash(hash string) string {
@@ -126,8 +303,14 @@ func (v *detailView) outlineRows(a *app, d *prDetail) []Row {
 		}
 	}
 	if d.outlineErr != "" {
+		// In split layout these rows land in the master column, so wrap to
+		// that width — the full terminal width would paint under the preview.
+		wrapWidth := a.w
+		if outlineSplit(a.w) {
+			wrapWidth = outlineMasterWidth(a.w)
+		}
 		rows := []Row{textRow(Span{" Outlineは利用できません", styleError}), textRow()}
-		for _, line := range wrapText(d.outlineErr, max(a.w-4, 20)) {
+		for _, line := range wrapText(d.outlineErr, max(wrapWidth-4, 20)) {
 			rows = append(rows, textRow(Span{"  " + line, styleNone}))
 		}
 		rows = append(rows, textRow(), textRow(Span{" 他のタブは通常どおり利用できます", styleDim}))
@@ -731,6 +914,12 @@ func (v *detailView) handleOutlineKey(a *app, k Key) bool {
 		return true
 	}
 	switch {
+	case isKey(k, 'C') && a.ctx.RepoDir == "":
+		v.beginOutlineClone(a)
+		return true
+	case isKey(k, 'F') && a.detailFor(v.prID).outlineFetchable:
+		v.beginOutlineFetch(a)
+		return true
 	case isKey(k, 'g'):
 		v.outline.pendingG = true
 		a.status = "Outline: gg=先頭  gd=callee  gr=caller"

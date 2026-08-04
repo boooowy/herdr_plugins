@@ -391,6 +391,53 @@ const commentFields = "next,values.id,values.created_on,values.updated_on,values
 	"values.resolution.created_on,values.resolution.user.display_name," +
 	"values.resolution.user.nickname,values.resolution.user.uuid,values.resolution.user.account_id"
 
+// repoListFields trims the workspace repository list to what the picker
+// renders plus the clone/browser URLs.
+const repoListFields = "next," +
+	"values.slug,values.name,values.full_name,values.description,values.updated_on," +
+	"values.links.clone.name,values.links.clone.href,values.links.html.href"
+
+// listReposFirstURL builds the first page of the workspace's repository
+// list, most recently updated first. A non-empty query narrows it
+// server-side by name substring; follow-up pages come from the `next` link
+// returned by listReposPage.
+func (c *bbClient) listReposFirstURL(ws, query string) string {
+	u := fmt.Sprintf("%s/repositories/%s?pagelen=50&sort=-updated_on&fields=%s",
+		c.base, url.PathEscape(ws), url.QueryEscape(repoListFields))
+	if query != "" {
+		// The q operand is a quoted string inside the query expression.
+		quoted := `"` + strings.ReplaceAll(query, `"`, `\"`) + `"`
+		u += "&q=" + url.QueryEscape(`name~`+quoted)
+	}
+	return u
+}
+
+// listReposPage fetches one page of the repository list; next is "" on the
+// last page.
+func (c *bbClient) listReposPage(pageURL string) (repos []Repository, next string, err error) {
+	var pg page[Repository]
+	if err := c.getJSON(pageURL, &pg); err != nil {
+		return nil, "", err
+	}
+	return pg.Values, pg.Next, nil
+}
+
+// repoDetailFields is repoListFields without the values. prefix, for the
+// single-repository endpoint (the Outline tab's clone shortcut needs the
+// clone URLs when the viewer was not launched through the picker).
+const repoDetailFields = "slug,name,full_name,description,updated_on," +
+	"links.clone.name,links.clone.href,links.html.href"
+
+// getRepo returns one repository (clone/browser links included).
+func (c *bbClient) getRepo(ws, repo string) (*Repository, error) {
+	var r Repository
+	u := c.repoURL(ws, repo, "?fields="+url.QueryEscape(repoDetailFields))
+	if err := c.getJSON(u, &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
 // listPRsFirstURL builds the first page of the repo's PR list filtered by
 // state (OPEN | MERGED | DECLINED | SUPERSEDED). Follow-up pages come from
 // the `next` link returned by listPRsPage.

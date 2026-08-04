@@ -18,6 +18,13 @@ var helpByCtx = map[string]struct {
 	title string
 	lines []helpLine
 }{
+	"picker": {"リポジトリ選択", []helpLine{
+		{"j / k / ↑ / ↓", "移動"},
+		{"Enter", "選択したリポジトリのPR一覧を開く"},
+		{"/", "絞り込み (リポジトリ名/説明、Esc で解除)"},
+		{"C", "ローカルにclone (y で確定。既存checkoutがあれば関連付けのみ)"},
+		{"y", "clone URL をコピー"},
+	}},
 	"list": {"PR一覧", []helpLine{
 		{"j / k / ↑ / ↓", "移動"},
 		{"Enter", "PR詳細を開く"},
@@ -35,6 +42,7 @@ var helpByCtx = map[string]struct {
 		{"gg / gd / gr", "Outline: 先頭 / 変更callee / 変更callerへ移動"},
 		{"Ctrl-o / Ctrl-i", "Outline: シンボル移動履歴を戻る / 進む"},
 		{"O", "Outline: 依存順 / アルファベット順を切替"},
+		{"C / F", "Outline: リポジトリをclone / 不足commitをfetch (y で確定)"},
 		{"Ctrl-d / Ctrl-u", "Outline/Comments: 右プレビューをスクロール"},
 		{"v", "内蔵diffビューアで開く (Filesタブ)"},
 		{"/", "絞り込み (Outline: シンボル/パス、Files: パス、Comments: 本文/著者/パス)"},

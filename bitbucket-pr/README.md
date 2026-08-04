@@ -7,7 +7,7 @@ PR 一覧 → 詳細（説明・変更シンボル・レビュアー・変更フ
 merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
-- version: `0.21.0`
+- version: `0.26.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -193,7 +193,7 @@ export JIRA_API_TOKEN="<Jiraスコープを持つAPIトークン>"
 
 ## 使い方
 
-起動方法は3つ:
+起動方法は4つ:
 
 1. **キーバインド（推奨）** — `~/.config/herdr/config.toml` に例えば:
 
@@ -209,15 +209,58 @@ description = "Bitbucket PR: open viewer for current repo"
    フォーカス中ペインの作業ディレクトリの `git remote origin` からリポジトリを自動判別し、
    PR 一覧を新しいタブで開きます。
 
-2. **PR URL を Ctrl+クリック** — ターミナルに流れた
+2. **リポジトリピッカー** — `boooowy.bitbucket-pr.open-picker` を
+   キーバインドすると、workspace のリポジトリ一覧（更新順）を検索して選ぶ画面から
+   起動できます。ローカル checkout が無い
+   リポジトリの PR もそのまま閲覧でき（Outline のみ不可）、`C` で選択制の
+   `git clone` もできます。詳細は「リポジトリピッカー」節を参照。
+   通常の `open` でリポジトリを判別できなかったときも、workspace が分かれば
+   自動的にこのピッカーへフォールバックします。
+
+3. **PR URL を Ctrl+クリック** — ターミナルに流れた
    `https://bitbucket.org/<ws>/<repo>/pull-requests/<id>` を Ctrl+クリックすると、
    その PR の詳細を直接開きます。
 
-3. **CLI から実行** — キーバインドを設定していないときや動作確認に:
+4. **CLI から実行** — キーバインドを設定していないときや動作確認に:
 
 ```sh
 herdr plugin action invoke open --plugin boooowy.bitbucket-pr
+herdr plugin action invoke open-picker --plugin boooowy.bitbucket-pr
 ```
+
+### リポジトリピッカー
+
+```text
+ Bitbucket リポジトリ — myworkspace   48件+      ● ~/Documents/workspace/my-app
+──────────────────────────────────────────────────────────────────────
+ ● my-app                       BFFのGoサービス                 3日前
+   legacy-batch                                                2週間前
+ ◌ cloning-now                  大きいリポジトリ                1ヶ月前
+──────────────────────────────────────────────────────────────────────
+ j/k:移動  Enter:PR一覧  /:検索  C:clone  o:ブラウザ  y:clone URL  r:再読込  q:終了
+```
+
+- 一覧は**更新が新しい順**で、カーソルが末尾に近づくと次のページを自動取得します。
+  `/` の絞り込み中に取得済みページで足りなければサーバー側の名前検索（`q=name~`）も
+  併用し、まだページインしていないリポジトリもヒットします。
+- 行頭マークが**ローカル checkout の有無**です（`●` あり / `◌` clone中 / 空白 なし）。
+  カーソル行の checkout パスはヘッダ右端に表示されます。判別は
+  config の `repo_roots` 配下の走査（`.git/config` の origin を読む）と、
+  プラグインが学習した対応表（`repo-dirs.json` — 通常起動や clone のたびに育つ）の
+  マージです。
+- `Enter` で PR 一覧へ。checkout が無くても Overview / Files / Comments / diff は
+  全て使えます（Outline のみ「C でclone」を案内）。`q`/`Esc` で PR 一覧から
+  ピッカーへ戻り、別リポジトリへ切り替えられます。
+
+- `C` は確認モーダル（`y` で実行）後に `git clone` を非同期実行します。clone 先は
+  `clone_dir`（未設定なら `repo_roots` の先頭）`/<repo>`。既に同名の checkout が
+  あれば clone せず関連付けだけ行います。完了時は herdr のトースト通知が出ます。
+- clone URL は API の `links.clone` から取得し、デフォルトは **ssh** です。
+  API トークンが URL や `.git/config` に書き込まれることはありません。
+  `clone_protocol = "https"` の場合は git の credential helper 設定が必要です。
+- `--depth`（shallow clone）は Outline が必要とする PR 両端の commit が欠けるため
+  非推奨です。`clone_args = ["--filter=blob:none"]` は動作しますが、初回の
+  Outline 解析時に blob の遅延取得が発生して遅くなります。
 
 ### Review Outline の利用条件とキャッシュ
 
@@ -226,7 +269,12 @@ source/destination commitを直接解析します。対象リポジトリ内の�
 両commitがローカルに存在する状態で利用してください。URLクリック時は、フォーカス中ペインの
 checkoutがURLのリポジトリと一致する場合だけ関連付けます。
 
-commitが無い場合、プラグインはcloneやfetchを自動実行しません。表示されたリポジトリで
+checkout が関連付いていない場合でも、プラグインが学習した対応表（`repo-dirs.json`）に
+該当リポジトリの checkout があれば自動で関連付けます。それも無ければ Outline タブに
+「C でclone」の案内を表示し、`C` → `y` で clone して解析をやり直せます（ピッカーの
+clone と同じ動作・同じ設定を使います）。
+
+commitが無い場合、プラグインはfetchを自動実行しません。表示されたリポジトリで
 PRブランチをfetchしてから `r` で再読込してください。Outlineだけが利用不可になり、Overview、
 Files、Commentsは通常どおり利用できます。
 
@@ -261,7 +309,7 @@ Filesタブで引き続き確認できます。
 | `za` / `zA`                                            | hunk 折畳 / 全折畳（内蔵ビューア）                                                                                                                                                                                                                                                                   |
 | `w`                                                    | 長い行の折返し切替（内蔵ビューア）                                                                                                                                                                                                                                                                   |
 | `c`                                                    | **コメント投稿** — diff 行:インラインコメント / `v` 選択中:**複数行コメント** / コメント上:返信（Comments タブの返信行では**入れ子返信**） / それ以外:PRコメント。投稿先はフッタに「c:返信→著者 L15」等で常に表示。エディタが popup で開き、保存して閉じると投稿（空なら中止）。**画面には自動反映** |
-| `C`                                                    | インラインコメント表示切替（内蔵ビューア）                                                                                                                                                                                                                                                           |
+| `C`                                                    | インラインコメント表示切替（内蔵ビューア） / **clone**（リポジトリピッカー、および checkout 未関連付け時の Outline タブ。`y` で確定）                                                                                                                                                                 |
 | `x`                                                    | Comments タブ: 選択コメントを**削除**（中央の確認画面で `y` を押す。返信付きコメントは Bitbucket 仕様でソフト削除）                                                                                                                                                                                 |
 | `s`                                                    | Comments タブ: スレッドを **resolve / 再オープン**（インラインスレッドのみ。返信行では**親スレッドに作用** — フッタに「s:親をresolve」と表示。解決済みは一覧に ✓・スレッドに [resolved] 表示）                                                                                                       |
 | `a` / `A` / `X`                                        | PR詳細: **承認 / 自分の承認取消 / Decline**（OPENのPRのみ。すべて `y` で確定、他キーで取消）                                                                                                                                                                                                          |
@@ -287,6 +335,14 @@ api_token = ""
 default_workspace = ""   # git remote で判別できないときのフォールバック
 default_repo = ""
 default_state = "OPEN"   # 一覧の初期フィルタ
+
+# リポジトリピッカー（open-picker）
+repo_roots = []          # ローカルcheckoutの探索ルート（例: ["~/Documents/workspace"]）。
+                         # 直下（グループディレクトリは1段下まで）の .git/config を読んで
+                         # bitbucket.org の checkout を「ローカルあり」として表示する
+clone_dir = ""           # C キーの clone 先。未設定なら repo_roots の先頭
+clone_protocol = "ssh"   # ssh | https（httpsは git credential helper の設定が必要）
+clone_args = []          # git clone の追加フラグ（例: ["--filter=blob:none"]。--depth は非推奨）
 placement = "tab"        # tab | split | zoomed | overlay — ビューア自体の配置
 list_tab_title = "PRs {repo}"  # ビューアの herdr タブ名。{repo} {workspace} が使える
 show_comments = true     # diff 内インラインコメントの初期表示
@@ -345,6 +401,18 @@ outdated_fg = "yellow"
 - `/` の絞り込みは**取得済みのページが対象**です（サーバー側検索ではありません）。絞り込み中に
   ヒットが画面を埋めない場合は、未取得ページを自動で追加取得して探し続けます
   （ヘッダは「12/48件+」のようにヒット数／取得済み件数を表示）。
+  例外としてリポジトリピッカーの `/` は、未取得分が残っている間はサーバー側の名前検索
+  （`q=name~`、最初の検索語のみ）も併用します。
+- ピッカーの「ローカルあり」判定は `repo_roots` 走査と学習済み対応表によります。ssh の
+  Host エイリアス（`git@bb-work:...` 等）を origin に使う checkout は走査では見つかりませんが、
+  そのリポジトリ内のペインから一度 `open` すれば学習されて以後表示されます。
+- ピッカーで別リポジトリへ切り替えると、前のリポジトリで開いた外部 diff ツールのタブは
+  追跡対象から外れます（タブ自体は残ります）。
+- **横断PRビュー（「自分が作成したPR」「レビュー待ちPR」の一覧）は非対応**です。
+  Bitbucket の公開APIには「自分がレビュアーのPR」を横断取得するエンドポイントが存在せず
+  （`role=reviewer` パラメータも無視される。実測確認済み）、リポジトリ毎の走査でしか
+  実現できずレート制限リスクが大きいため見送りました。ブラウザの Bitbucket
+  ダッシュボード（For you）を利用してください。
 - 起動時は前回取得した一覧を即表示し、裏で最新に更新します
   （キャッシュは plugin の state ディレクトリ配下 `cache/`）。
 - アバターは中央を正方形に切り出して state ディレクトリ配下へ無期限で保存します。

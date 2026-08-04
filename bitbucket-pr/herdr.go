@@ -89,6 +89,7 @@ func (c *herdrClient) call(method string, params map[string]any, out any) error 
 // than cwd).
 type paneInfo struct {
 	PaneID        string `json:"pane_id"`
+	TabID         string `json:"tab_id"`
 	Focused       bool   `json:"focused"`
 	Cwd           string `json:"cwd"`
 	ForegroundCwd string `json:"foreground_cwd"`

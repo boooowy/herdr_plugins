@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -295,5 +296,48 @@ func TestOutlineGDGRAndHistory(t *testing.T) {
 	v.navigateOutlineHistory(a, -1)
 	if got := v.currentOutlineSymbol(a); got == nil || got.ID != "caller" {
 		t.Fatalf("history target = %#v, status=%q", got, a.status)
+	}
+}
+
+func TestOutlineUserErrorIdentifiesMissingSide(t *testing.T) {
+	source := "68a5131400000000000000000000000000000000"
+	destination := "b83aab7700000000000000000000000000000000"
+	cases := []struct {
+		name      string
+		err       string
+		want      string
+		fetchable bool
+	}{
+		{"destination missing", "commit b83aab775731 がローカルにありません: fatal", "マージ先ブランチのcommit b83aab77", true},
+		{"source missing", "commit 68a513140000 がローカルにありません: fatal", "PRブランチのcommit 68a51314", true},
+		{"unknown hash", "commit 000000000000 がローカルにありません: fatal", "PRのcommit がローカルにありません", true},
+		{"other error", "git ls-tree 68a513140000: exit status 128", "Outlineを解析できません", false},
+	}
+	for _, tc := range cases {
+		msg, fetchable := outlineUserError("/repo", source, destination, errors.New(tc.err))
+		if !strings.Contains(msg, tc.want) {
+			t.Errorf("%s: message %q does not contain %q", tc.name, msg, tc.want)
+		}
+		if fetchable != tc.fetchable {
+			t.Errorf("%s: fetchable = %v, want %v", tc.name, fetchable, tc.fetchable)
+		}
+	}
+}
+
+func TestOutlineFetchKeyOpensConfirmation(t *testing.T) {
+	a, v, d := outlineFixtureApp(120)
+	a.ctx.RepoDir = "/repo"
+
+	// Without the missing-commit error F stays inert.
+	if v.handleOutlineKey(a, Key{Kind: KeyRune, R: 'F'}) {
+		t.Fatal("F was consumed without a fetchable error")
+	}
+
+	d.outlineFetchable = true
+	if !v.handleOutlineKey(a, Key{Kind: KeyRune, R: 'F'}) {
+		t.Fatal("F was not consumed in the fetchable error state")
+	}
+	if v.pendingAction.kind != detailActionFetch {
+		t.Fatalf("pending action = %v, want detailActionFetch", v.pendingAction.kind)
 	}
 }

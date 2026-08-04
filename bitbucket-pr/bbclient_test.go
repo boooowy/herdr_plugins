@@ -453,3 +453,73 @@ func TestHTTPErrorSurfacesStatus(t *testing.T) {
 		t.Errorf("status = %d", he.Status)
 	}
 }
+
+func TestListReposFirstURLBuildsQuery(t *testing.T) {
+	c := newBBClient("u@example.com", "tok", 5*time.Second)
+
+	u := c.listReposFirstURL("my-ws", "")
+	if !strings.HasPrefix(u, "https://api.bitbucket.org/2.0/repositories/my-ws?") {
+		t.Errorf("base URL = %q", u)
+	}
+	parsed, err := url.Parse(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := parsed.Query()
+	if q.Get("sort") != "-updated_on" || q.Get("pagelen") != "50" {
+		t.Errorf("sort/pagelen: %v", q)
+	}
+	if f := q.Get("fields"); !strings.Contains(f, "values.slug") || !strings.Contains(f, "values.links.clone.href") {
+		t.Errorf("fields must trim the payload, got %q", f)
+	}
+	if q.Get("q") != "" {
+		t.Errorf("no q param expected without a query, got %q", q.Get("q"))
+	}
+
+	parsed, err = url.Parse(c.listReposFirstURL("my-ws", `ga"te`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := parsed.Query().Get("q"), `name~"ga\"te"`; got != want {
+		t.Errorf("q = %q, want %q (quoted and escaped)", got, want)
+	}
+}
+
+func TestListReposPageAndGetRepo(t *testing.T) {
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"values":[{"slug":"a","full_name":"ws/a","links":{"clone":[{"name":"ssh","href":"git@bitbucket.org:ws/a.git"}]}}],"next":"%s/2.0/repositories/ws?page=2"}`, srv.URL)
+	})
+	mux.HandleFunc("/2.0/repositories/ws/a", func(w http.ResponseWriter, r *http.Request) {
+		if f := r.URL.Query().Get("fields"); !strings.Contains(f, "links.clone.href") {
+			t.Errorf("getRepo should trim via fields=, got %q", f)
+		}
+		fmt.Fprint(w, `{"slug":"a","full_name":"ws/a","links":{"clone":[{"name":"https","href":"https://bitbucket.org/ws/a.git"}]}}`)
+	})
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := testClient(srv)
+	repos, next, err := c.listReposPage(c.listReposFirstURL("ws", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 1 || repos[0].Slug != "a" || next == "" {
+		t.Errorf("repos=%+v next=%q", repos, next)
+	}
+	if got := repos[0].CloneURL("ssh"); got != "git@bitbucket.org:ws/a.git" {
+		t.Errorf("CloneURL(ssh) = %q", got)
+	}
+	if got := repos[0].CloneURL("https"); got != "" {
+		t.Errorf("CloneURL(https) = %q, want empty when absent", got)
+	}
+
+	repo, err := c.getRepo("ws", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.CloneURL("https") != "https://bitbucket.org/ws/a.git" {
+		t.Errorf("getRepo clone url = %q", repo.CloneURL("https"))
+	}
+}
