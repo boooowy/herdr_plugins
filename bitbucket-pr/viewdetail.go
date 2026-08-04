@@ -494,8 +494,16 @@ func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 		}
 	}
 
+	// Group headers share the threads' full-width focus-bg cursor so the
+	// whole pane highlights consistently.
+	groupRow := func(item cmtGroup, spans ...Span) Row {
+		r := row(RowFile, item, true, spans...)
+		r.CursorRows = 1
+		return r
+	}
+
 	if len(general) > 0 {
-		rows = append(rows, row(RowFile, cmtGroup{}, true,
+		rows = append(rows, groupRow(cmtGroup{},
 			Span{" 💬 ", styleNone},
 			Span{fmt.Sprintf("PR コメント (%d)", len(general)), styleTitle}))
 		for _, t := range general {
@@ -506,7 +514,7 @@ func (v *detailView) commentMasterRows(a *app, d *prDetail) []Row {
 	for _, path := range orderedInlinePaths(byFile) {
 		threads := byFile[path]
 		v.cmtFirstThread[path] = threads[0].Root.ID
-		rows = append(rows, row(RowFile, cmtGroup{Path: path}, true,
+		rows = append(rows, groupRow(cmtGroup{Path: path},
 			Span{" 📄 ", styleNone},
 			Span{truncateWidth(path, width-5), styleTitle}))
 		for _, t := range threads {
@@ -535,6 +543,7 @@ func masterThreadRow(t CommentThread, width int, showAvatars bool) Row {
 	spans = appendExcerptSpan(spans, t.Root, width)
 	r := row(RowComment, t.Root.ID, true, spans...)
 	r.Avatars = avatars
+	r.CursorRows = 1 // full-width focus-bg cursor: the row is mostly colored spans
 	return r
 }
 
@@ -547,6 +556,7 @@ func masterReplyRow(r Reply, width int, showAvatars bool) Row {
 	spans = appendExcerptSpan(spans, r.Comment, width)
 	row := row(RowComment, r.ID, true, spans...)
 	row.Avatars = avatars
+	row.CursorRows = 1
 	return row
 }
 

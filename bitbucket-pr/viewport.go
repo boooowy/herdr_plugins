@@ -48,8 +48,9 @@ type Row struct {
 	Item       any
 	Selectable bool
 	Avatars    []RowAvatar
-	// CursorRows groups this row with the following rows for cursor painting.
-	// Zero keeps the default one-row inverse cursor.
+	// CursorRows groups this row with the following rows for cursor painting
+	// on the focus background (1 = just this row, full width). Zero keeps the
+	// default one-row inverse cursor on plain cells.
 	CursorRows int
 }
 
@@ -232,11 +233,11 @@ func (v *Viewport) Paint(s *Screen, r Rect) {
 			}
 			s.AddAvatar(ax, ay, avatar.Cols, avatar.Rows, avatar.URL, avatar.AccountID, avatar.Badge)
 		}
-		if idx == v.Cursor && v.Rows[idx].CursorRows <= 1 {
+		if idx == v.Cursor && v.Rows[idx].CursorRows == 0 {
 			s.StyleRow(r.Y+i, r.X, r.X+r.W, styleNone, styleCursor)
 		}
 	}
-	if v.Cursor >= 0 && v.Cursor < len(v.Rows) && v.Rows[v.Cursor].CursorRows > 1 {
+	if v.Cursor >= 0 && v.Cursor < len(v.Rows) && v.Rows[v.Cursor].CursorRows >= 1 {
 		end := v.Cursor + v.Rows[v.Cursor].CursorRows
 		if end > len(v.Rows) {
 			end = len(v.Rows)

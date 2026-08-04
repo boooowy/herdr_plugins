@@ -293,6 +293,32 @@ func moveCursorTo(t *testing.T, v *detailView, id int) {
 	t.Fatalf("comment %d not found in master rows", id)
 }
 
+func TestCommentMasterCursorHighlightsFullRow(t *testing.T) {
+	a, v := masterViewFixture(t)
+	leftW := commentMasterWidth(a.w)
+	paint := func() *Screen {
+		s := NewScreen(a.w, a.h)
+		v.vp[tabComments].Paint(s, Rect{X: 0, Y: 0, W: leftW, H: a.h})
+		return s
+	}
+
+	// Group header, thread root, and reply rows all get the full-width
+	// focus background — colored spans included, out to the pane edge.
+	for _, id := range []int{1, 4} { // thread root, reply
+		moveCursorTo(t, v, id)
+		s := paint()
+		y := v.vp[tabComments].Cursor - v.vp[tabComments].Top
+		for _, x := range []int{0, 10, leftW - 1} {
+			if got := s.at(x, y).Style; got < styleOnFocusBg {
+				t.Errorf("comment %d: cell (%d,%d) style = %d, want focus-bg variant", id, x, y, got)
+			}
+		}
+		if got := s.at(0, y+1).Style; got >= styleOnFocusBg {
+			t.Errorf("comment %d: row below the cursor must not be focused (style=%d)", id, got)
+		}
+	}
+}
+
 func TestSelectedCommentOnReplyRow(t *testing.T) {
 	_, v := masterViewFixture(t)
 	moveCursorTo(t, v, 4) // reply on thread 2

@@ -43,10 +43,19 @@ func mdStyledLines(text string, width int, base StyleID) [][]Span {
 		out = append(out, highlightCode(fenceLang, strings.Join(fenceBuf, "\n"), width)...)
 		fenceBuf, inFence = nil, false
 	}
+	var tableBuf []string
+	tableIndent := ""
+	closeTable := func() {
+		out = append(out, renderTable(tableBuf, tableIndent, width, base)...)
+		tableBuf = nil
+	}
 
 	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		trimmed := strings.TrimLeft(line, " \t")
 		indent := line[:len(line)-len(trimmed)]
+		if len(tableBuf) > 0 && (inFence || !strings.HasPrefix(trimmed, "|")) {
+			closeTable()
+		}
 		switch {
 		case strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~"):
 			// No fence bars: the block's background rectangle is delimiter
@@ -72,7 +81,10 @@ func mdStyledLines(text string, width int, base StyleID) [][]Span {
 		case isHRule(trimmed):
 			emit([]Span{{strings.Repeat("─", width), styleDim}})
 		case strings.HasPrefix(trimmed, "|"):
-			emit([]Span{{indent + mdTableLine(trimmed), tableStyle(trimmed, base)}})
+			if len(tableBuf) == 0 {
+				tableIndent = indent
+			}
+			tableBuf = append(tableBuf, trimmed)
 		default:
 			if marker, rest, ok := splitBullet(line); ok {
 				m := indent + "• "
@@ -96,6 +108,9 @@ func mdStyledLines(text string, width int, base StyleID) [][]Span {
 	}
 	if inFence {
 		closeFence() // unterminated fence at end of input
+	}
+	if len(tableBuf) > 0 {
+		closeTable()
 	}
 	return out
 }
@@ -295,6 +310,213 @@ func isHRule(t string) bool {
 		}
 	}
 	return true
+}
+
+// Cell alignment from a delimiter cell (":--" / ":-:" / "--:").
+const (
+	alignLeft = iota
+	alignCenter
+	alignRight
+)
+
+// renderTable renders buffered pipe-table lines as a column-aligned table:
+// header cells bold, │/┼ borders dim, cell contents through the inline
+// parser. Anything without a delimiter second row is not a table — those
+// lines keep the old per-line │ substitution.
+func renderTable(lines []string, indent string, width int, base StyleID) [][]Span {
+	if len(lines) < 2 || !isTableDelimiter(lines[1]) {
+		var out [][]Span
+		for _, l := range lines {
+			out = append(out, wrapSpans([]Span{{indent + mdTableLine(l), tableStyle(l, base)}}, width)...)
+		}
+		return out
+	}
+
+	// Parse: rows of inline-styled cells (the delimiter row only feeds
+	// alignment), sized by their display width.
+	var aligns []int
+	for _, c := range splitTableCells(lines[1]) {
+		aligns = append(aligns, delimAlign(c))
+	}
+	type cell struct {
+		spans []Span
+		w     int
+	}
+	var rows [][]cell
+	cols := len(aligns)
+	for i, l := range lines {
+		if i == 1 {
+			continue
+		}
+		st := base
+		if i == 0 {
+			st = styleTitle
+		}
+		var row []cell
+		for _, c := range splitTableCells(l) {
+			spans := mdInlineSpans(c, st)
+			w := 0
+			for _, sp := range spans {
+				w += displayWidth(sp.Text)
+			}
+			row = append(row, cell{spans, w})
+		}
+		if len(row) > cols {
+			cols = len(row)
+		}
+		rows = append(rows, row)
+	}
+	for len(aligns) < cols {
+		aligns = append(aligns, alignLeft)
+	}
+
+	colW := make([]int, cols)
+	for _, row := range rows {
+		for j, c := range row {
+			if c.w > colW[j] {
+				colW[j] = c.w
+			}
+		}
+	}
+	// Shrink the widest columns (never below 3 cells) until the table fits;
+	// overflowing cells are truncated with an ellipsis.
+	avail := width - displayWidth(indent) - 3*cols - 1 // "│ cell " per column + closing "│"
+	for {
+		total, widest := 0, 0
+		for j, w := range colW {
+			total += w
+			if w > colW[widest] {
+				widest = j
+			}
+		}
+		if total <= avail || colW[widest] <= 3 {
+			break
+		}
+		colW[widest]--
+	}
+
+	var out [][]Span
+	pad := func(spans []Span, n int, side int) []Span {
+		if n <= 0 {
+			return spans
+		}
+		sp := Span{strings.Repeat(" ", n), styleNone}
+		if side == alignRight {
+			return append([]Span{sp}, spans...)
+		}
+		return append(spans, sp)
+	}
+	lead := func() []Span {
+		if indent == "" {
+			return nil
+		}
+		return []Span{{indent, styleNone}}
+	}
+	emitRow := func(row []cell) {
+		spans := lead()
+		for j := 0; j < cols; j++ {
+			c := cell{[]Span{}, 0}
+			if j < len(row) {
+				c = row[j]
+			}
+			cs, w := fitSpans(c.spans, colW[j])
+			switch aligns[j] {
+			case alignRight:
+				cs = pad(cs, colW[j]-w, alignRight)
+			case alignCenter:
+				l := (colW[j] - w) / 2
+				cs = pad(pad(cs, l, alignRight), colW[j]-w-l, alignLeft)
+			default:
+				cs = pad(cs, colW[j]-w, alignLeft)
+			}
+			spans = append(spans, Span{"│ ", styleDim})
+			spans = append(spans, cs...)
+			spans = append(spans, Span{" ", styleNone})
+		}
+		out = append(out, append(spans, Span{"│", styleDim}))
+	}
+	delim := func() {
+		var b strings.Builder
+		for j := 0; j < cols; j++ {
+			b.WriteString("┼")
+			b.WriteString(strings.Repeat("─", colW[j]+2))
+		}
+		b.WriteString("┼")
+		out = append(out, append(lead(), Span{b.String(), styleDim}))
+	}
+	emitRow(rows[0])
+	delim()
+	for _, row := range rows[1:] {
+		emitRow(row)
+	}
+	return out
+}
+
+// splitTableCells splits a pipe-table row into trimmed cell texts, keeping
+// \| escapes intact for the inline parser to unescape.
+func splitTableCells(line string) []string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "|")
+	if strings.HasSuffix(line, "|") && !strings.HasSuffix(line, "\\|") {
+		line = line[:len(line)-1]
+	}
+	var cells []string
+	var b strings.Builder
+	for i := 0; i < len(line); i++ {
+		switch {
+		case line[i] == '\\' && i+1 < len(line) && line[i+1] == '|':
+			b.WriteString(`\|`)
+			i++
+		case line[i] == '|':
+			cells = append(cells, strings.TrimSpace(b.String()))
+			b.Reset()
+		default:
+			b.WriteByte(line[i])
+		}
+	}
+	return append(cells, strings.TrimSpace(b.String()))
+}
+
+func delimAlign(cell string) int {
+	l, r := strings.HasPrefix(cell, ":"), strings.HasSuffix(cell, ":")
+	switch {
+	case l && r:
+		return alignCenter
+	case r:
+		return alignRight
+	default:
+		return alignLeft
+	}
+}
+
+// fitSpans truncates styled spans to at most w cells (ellipsis when cut) and
+// returns the resulting display width.
+func fitSpans(spans []Span, w int) ([]Span, int) {
+	used := 0
+	for _, sp := range spans {
+		used += displayWidth(sp.Text)
+	}
+	if used <= w {
+		return spans, used
+	}
+	var out []Span
+	cur := 0
+	for _, sp := range spans {
+		var b strings.Builder
+		for _, r := range sp.Text {
+			rw := runewidth.RuneWidth(r)
+			if cur+rw > w-1 { // reserve the last cell for the ellipsis
+				if b.Len() > 0 {
+					out = append(out, Span{b.String(), sp.Style})
+				}
+				return append(out, Span{"…", sp.Style}), cur + 1
+			}
+			b.WriteRune(r)
+			cur += rw
+		}
+		out = append(out, Span{b.String(), sp.Style})
+	}
+	return out, cur
 }
 
 // mdTableLine restyles a pipe-table row: │ borders, ─ in delimiter rows.
