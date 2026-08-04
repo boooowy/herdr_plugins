@@ -81,6 +81,48 @@ func newPRMemo(body string) reviewMemo {
 	return reviewMemo{ID: time.Now().UnixNano(), Body: body, CreatedOn: time.Now()}
 }
 
+// fileMemo builds a memo anchored to a whole file (no line range).
+func fileMemo(path string) reviewMemo {
+	return reviewMemo{ID: time.Now().UnixNano(), Path: path, CreatedOn: time.Now()}
+}
+
+// memoFromAnchor builds a memo from a Bitbucket inline anchor (a comment
+// thread's location), snapshotting the anchored diff lines when the file is
+// in the loaded diff — same excerpt an m-key memo gets in the diff view.
+func memoFromAnchor(files []FileDiff, in *InlineAnchor) reviewMemo {
+	oldRange, newRange := anchorRanges(in)
+	if lines := linesInRange(fileDiffFor(files, in.Path), oldRange, newRange); len(lines) > 0 {
+		return memoFromDiff(in.Path, lines, "")
+	}
+	return reviewMemo{
+		ID:        time.Now().UnixNano(),
+		Path:      in.Path,
+		OldRange:  oldRange,
+		NewRange:  newRange,
+		CreatedOn: time.Now(),
+	}
+}
+
+// anchorRanges maps an inline anchor onto [start, end] side ranges (new
+// side wins, mirroring anchorLabel).
+func anchorRanges(in *InlineAnchor) (oldRange, newRange []int) {
+	switch {
+	case in.To != nil && *in.To > 0:
+		start := *in.To
+		if in.StartTo != nil && *in.StartTo > 0 {
+			start = *in.StartTo
+		}
+		newRange = []int{start, *in.To}
+	case in.From != nil && *in.From > 0:
+		start := *in.From
+		if in.StartFrom != nil && *in.StartFrom > 0 {
+			start = *in.StartFrom
+		}
+		oldRange = []int{start, *in.From}
+	}
+	return oldRange, newRange
+}
+
 // minMaxRange collapses line numbers into a [start, end] pair (nil when
 // empty).
 func minMaxRange(nos []int) []int {

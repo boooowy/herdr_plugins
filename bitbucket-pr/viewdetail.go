@@ -303,6 +303,50 @@ func memoTarget(m reviewMemo) string {
 	return m.Path + " " + m.lineLabel() + " へのメモ"
 }
 
+// composeMemo opens the memo editor anchored to the current tab context
+// (see memoContext). The anchor is captured in the onSave closure; the memo
+// lands in the store only when the editor saves a non-empty body.
+func (v *detailView) composeMemo(a *app) {
+	memo, target := v.memoContext(a)
+	prID := v.prID
+	openMemoEditor(a, prID, "", target, func(a *app, body string) {
+		memo.Body = body
+		store := a.memosFor(prID)
+		store.add(memo)
+		a.status = fmt.Sprintf("メモを追加しました (%d件 — M:一覧)", len(store.memos))
+		rebuildMemoTab(a, prID)
+	})
+}
+
+// memoContext resolves what a new memo anchors to. Files tab: the file
+// under the cursor. Comments tab: a file header row anchors to its file, a
+// thread row to the thread's file + line range (with the diff excerpt
+// snapshotted). Everything else — general threads included — falls back to
+// a PR-level memo.
+func (v *detailView) memoContext(a *app) (reviewMemo, string) {
+	d := a.detailFor(v.prID)
+	switch v.tab {
+	case tabFiles:
+		if r := v.vp[tabFiles].Current(); r != nil && r.Kind == RowFile {
+			if i, ok := r.Item.(int); ok && i >= 0 && i < len(d.diffstat) {
+				path := d.diffstat[i].Path()
+				return fileMemo(path), path + " へのメモ"
+			}
+		}
+	case tabComments:
+		if r := v.vp[tabComments].Current(); r != nil {
+			if g, ok := r.Item.(cmtGroup); ok && g.Path != "" {
+				return fileMemo(g.Path), g.Path + " へのメモ"
+			}
+		}
+		if t, ok := v.currentThread(); ok && t.Root.Inline != nil {
+			in := t.Root.Inline
+			return memoFromAnchor(d.files, in), in.Path + " " + anchorLabel(in) + " へのメモ"
+		}
+	}
+	return newPRMemo(""), "PR全体へのメモ"
+}
+
 // openMemoInDiff pushes the built-in diff view scrolled to the memo's
 // anchor line (Enter on the Memo tab).
 func (v *detailView) openMemoInDiff(a *app, id int64) {
@@ -1272,14 +1316,7 @@ func (v *detailView) handle(a *app, k Key) {
 		}
 		openCommentEditor(a, v.prID, nil, parent, target)
 	case isKey(k, 'm'):
-		// A PR-level memo (no anchor), available from every tab.
-		prID := v.prID
-		openMemoEditor(a, prID, "", "PR全体へのメモ", func(a *app, body string) {
-			store := a.memosFor(prID)
-			store.add(newPRMemo(body))
-			a.status = fmt.Sprintf("メモを追加しました (%d件)", len(store.memos))
-			rebuildMemoTab(a, prID)
-		})
+		v.composeMemo(a)
 	case isKey(k, 'd') && v.tab == tabMemo:
 		if id, ok := v.currentMemoID(); ok {
 			if m := a.memosFor(v.prID).byID(id); m != nil {

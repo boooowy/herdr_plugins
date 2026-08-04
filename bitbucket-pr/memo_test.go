@@ -232,6 +232,50 @@ func TestOpenMemoInDiffJumpTarget(t *testing.T) {
 	}
 }
 
+func TestDetailMemoContext(t *testing.T) {
+	newSide := func(path string) *struct {
+		Path string `json:"path"`
+	} {
+		return &struct {
+			Path string `json:"path"`
+		}{Path: path}
+	}
+	a := &app{w: 100, h: 20, detail: map[int]*prDetail{}}
+	d := a.detailFor(1)
+	d.diffstat = []DiffStatEntry{{Status: "modified", New: newSide("a.go")}}
+	d.files = []FileDiff{{
+		NewPath: "a.go",
+		Hunks:   []Hunk{{Lines: []DiffLine{{Kind: LineAdd, NewNo: 10, Text: "added"}}}},
+	}}
+
+	// Files tab: the file under the cursor, no line range.
+	v := &detailView{prID: 1, tab: tabFiles}
+	v.vp[tabFiles].Reset([]Row{row(RowFile, 0, true, Span{"a.go", styleNone})})
+	m, target := v.memoContext(a)
+	if m.Path != "a.go" || m.lineLabel() != "" || !strings.Contains(target, "a.go") {
+		t.Errorf("files-tab context: %+v %q", m, target)
+	}
+
+	// Comments tab: the selected inline thread's file + line, with excerpt.
+	to := 10
+	v.tab = tabComments
+	v.threadFor = map[int]CommentThread{7: {Root: Comment{ID: 7, Inline: &InlineAnchor{Path: "a.go", To: &to}}}}
+	v.vp[tabComments].Reset([]Row{row(RowComment, 7, true, Span{"x", styleNone})})
+	m, _ = v.memoContext(a)
+	if m.Path != "a.go" || !intsEqual(m.NewRange, []int{10, 10}) {
+		t.Errorf("comments-tab context: %+v", m)
+	}
+	if strings.Join(m.Excerpt, "\n") != "+ added" {
+		t.Errorf("comments-tab excerpt: %q", m.Excerpt)
+	}
+
+	// Elsewhere: PR-level fallback.
+	v.tab = tabOverview
+	if m, _ = v.memoContext(a); m.Path != "" {
+		t.Errorf("overview fallback: %+v", m)
+	}
+}
+
 func TestNotesToMemos(t *testing.T) {
 	files := []FileDiff{{
 		NewPath: "a.go",
