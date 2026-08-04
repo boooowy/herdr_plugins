@@ -77,6 +77,97 @@ func TestMDStyledLinesBlocks(t *testing.T) {
 	}
 }
 
+func joinedLine(spans []Span) string {
+	joined := ""
+	for _, sp := range spans {
+		joined += sp.Text
+	}
+	return joined
+}
+
+func TestMDTableAligned(t *testing.T) {
+	md := "| Name | 説明 | N |\n|:--|:-:|--:|\n| a | 全角セル | 1 |\n| longer | b | 22 |"
+	lines := mdStyledLines(md, 60, styleNone)
+
+	if len(lines) != 4 {
+		t.Fatalf("want 4 table lines, got %d: %v", len(lines), lines)
+	}
+	rows := make([]string, len(lines))
+	for i, spans := range lines {
+		rows[i] = joinedLine(spans)
+	}
+	// Columns pad to the widest cell (CJK cells count 2 per rune).
+	want := []string{
+		"│ Name   │   説明   │  N │",
+		"┼────────┼──────────┼────┼",
+		"│ a      │ 全角セル │  1 │",
+		"│ longer │    b     │ 22 │",
+	}
+	for i, w := range want {
+		if rows[i] != w {
+			t.Errorf("row %d:\n got %q\nwant %q", i, rows[i], w)
+		}
+	}
+	// Header cells are bold, borders dim.
+	for _, sp := range lines[0] {
+		if sp.Text == "Name" && sp.Style != styleTitle {
+			t.Errorf("header cell must be bold: %+v", sp)
+		}
+		if strings.Contains(sp.Text, "│") && sp.Style != styleDim {
+			t.Errorf("border must be dim: %+v", sp)
+		}
+	}
+}
+
+func TestMDTableCellInline(t *testing.T) {
+	md := "| H |\n|---|\n| `code` x |"
+	lines := mdStyledLines(md, 60, styleNone)
+	body := findLine(t, lines, "code")
+	found := false
+	for _, sp := range body {
+		if sp.Text == "code" && sp.Style == styleMDCode {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("cell inline code must be styled: %+v", body)
+	}
+}
+
+func TestMDTableTruncation(t *testing.T) {
+	md := "| A | B |\n|---|---|\n| " + strings.Repeat("あ", 40) + " | b |"
+	lines := mdStyledLines(md, 30, styleNone)
+	for _, spans := range lines {
+		if w := displayWidth(joinedLine(spans)); w > 30 {
+			t.Errorf("table row exceeds width: %d %q", w, joinedLine(spans))
+		}
+	}
+	if findLine(t, lines, "…") == nil {
+		t.Error("overflowing cell must end with an ellipsis")
+	}
+}
+
+func TestMDTableNoDelimiterFallback(t *testing.T) {
+	md := "| just | pipes |\n| no | delim |"
+	lines := mdStyledLines(md, 60, styleNone)
+	if tb := findLine(t, lines, "│ just │ pipes │"); tb[0].Style != styleNone {
+		t.Errorf("fallback row keeps base style: %+v", tb)
+	}
+	for _, spans := range lines {
+		if strings.Contains(joinedLine(spans), "┼") {
+			t.Errorf("no delimiter row expected: %q", joinedLine(spans))
+		}
+	}
+}
+
+func TestMDTableEscapedPipe(t *testing.T) {
+	md := "| A |\n|---|\n| a \\| b |"
+	lines := mdStyledLines(md, 60, styleNone)
+	if findLine(t, lines, "a | b") == nil {
+		t.Error("escaped pipe must stay inside the cell")
+	}
+}
+
 func TestMDInlineSpans(t *testing.T) {
 	spans := mdInlineSpans("a `code` **強調** [リンク](https://x.example/) https://y.example/ \\(esc\\)", styleNone)
 	joined := ""
