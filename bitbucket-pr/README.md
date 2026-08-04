@@ -7,7 +7,7 @@ PR 一覧 → 詳細（説明・変更シンボル・レビュアー・変更フ
 merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
-- version: `0.26.0`
+- version: `0.27.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
