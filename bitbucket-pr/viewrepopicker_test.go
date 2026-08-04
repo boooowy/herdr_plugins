@@ -20,20 +20,35 @@ func TestRepoPickerRebuildMarksLocalCheckouts(t *testing.T) {
 	a.repos = []Repository{
 		{Slug: "with-local", FullName: "ws/with-local", UpdatedOn: time.Now()},
 		{Slug: "without", FullName: "ws/without"},
+		{Slug: "cloning", FullName: "ws/cloning"},
 	}
 	a.localDirs["ws/with-local"] = "/home/u/src/with-local"
+	a.cloneInFlight["ws/cloning"] = true
 
 	v := &repoPickerView{}
 	v.rebuild(a)
 
-	if got, want := len(v.vp.Rows), 4; got != want {
-		t.Fatalf("rows = %d, want %d", got, want)
+	if got, want := len(v.vp.Rows), 3; got != want {
+		t.Fatalf("rows = %d, want %d (one line per repo)", got, want)
 	}
-	if got := spansText(v.vp.Rows[1]); !strings.Contains(got, "●") {
-		t.Errorf("local meta row = %q, want ● mark", got)
+	if got := spansText(v.vp.Rows[0]); !strings.Contains(got, "●") {
+		t.Errorf("local row = %q, want ● mark", got)
 	}
-	if got := spansText(v.vp.Rows[3]); !strings.Contains(got, "ローカルなし") {
-		t.Errorf("missing meta row = %q, want ローカルなし", got)
+	if got := spansText(v.vp.Rows[1]); strings.Contains(got, "●") || strings.Contains(got, "◌") {
+		t.Errorf("non-local row = %q, want blank mark", got)
+	}
+	if got := spansText(v.vp.Rows[2]); !strings.Contains(got, "◌") {
+		t.Errorf("cloning row = %q, want ◌ mark", got)
+	}
+}
+
+func TestRepoPickerEmptyDescriptionStaysBlank(t *testing.T) {
+	a := pickerTestApp()
+	a.repos = []Repository{{Slug: "no-desc", FullName: "ws/no-desc"}}
+	v := &repoPickerView{}
+	v.rebuild(a)
+	if got := spansText(v.vp.Rows[0]); strings.Contains(got, "説明なし") {
+		t.Errorf("row = %q, empty description must stay blank", got)
 	}
 }
 
@@ -75,7 +90,7 @@ func TestRepoPickerRemoteResultsAppendDeduped(t *testing.T) {
 	if v.shown != 2 {
 		t.Fatalf("shown = %d, want 2 (local + deduped remote)", v.shown)
 	}
-	last := v.vp.Rows[len(v.vp.Rows)-2]
+	last := v.vp.Rows[len(v.vp.Rows)-1]
 	if got := spansText(last); !strings.Contains(got, "gate-keeper") {
 		t.Errorf("remote hit missing: %q", got)
 	}

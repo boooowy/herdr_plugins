@@ -167,7 +167,7 @@ func (v *repoPickerView) rebuild(a *app) {
 			continue
 		}
 		v.shown++
-		rows = append(rows, v.repoRow(a, r, i, now), v.metaRow(a, r))
+		rows = append(rows, v.repoRow(a, r, i, now))
 	}
 	if q != "" {
 		// Server-side hits beyond the locally paged-in list.
@@ -181,7 +181,7 @@ func (v *repoPickerView) rebuild(a *app) {
 				continue
 			}
 			v.shown++
-			rows = append(rows, v.repoRow(a, r, -i-1, now), v.metaRow(a, r))
+			rows = append(rows, v.repoRow(a, r, -i-1, now))
 		}
 	}
 	if v.shown == 0 {
@@ -201,46 +201,27 @@ func (v *repoPickerView) rebuild(a *app) {
 	v.maybeRemoteSearch(a)
 }
 
-// repoRow is the first line of one repository entry.
+// repoRow is one repository line. The two leading mark cells show the local
+// checkout state: ● checkout present, ◌ clone running, blank otherwise (the
+// cursor row's checkout path appears at the right edge of the header).
 func (v *repoPickerView) repoRow(a *app, r *Repository, item int, now time.Time) Row {
-	descW := pickerDescWidth(a)
-	desc := r.Description
-	if desc == "" {
-		desc = "(説明なし)"
+	mark, markStyle := "  ", styleDim
+	switch {
+	case a.cloneInFlight[r.FullName]:
+		mark, markStyle = "◌ ", styleMeta
+	case a.localDirs[repoDirKey(a.ctx.Workspace, r.Slug)] != "":
+		mark, markStyle = "● ", styleApproved
 	}
-	desc = strings.ReplaceAll(desc, "\n", " ")
-	repoRow := row(RowRepo, item, true,
+	descW := pickerDescWidth(a)
+	desc := strings.ReplaceAll(r.Description, "\n", " ")
+	return row(RowRepo, item, true,
 		Span{" ", styleNone},
+		Span{mark, markStyle},
 		Span{padRight(truncateWidth(r.Slug, pickerSlugWidth), pickerSlugWidth), styleNone},
 		Span{"  ", styleNone},
 		Span{padRight(truncateWidth(desc, descW), descW), styleDim},
 		Span{"  " + padRight(truncateWidth(relTime(r.UpdatedOn, now), pickerUpdatedWidth), pickerUpdatedWidth), styleDim},
 	)
-	repoRow.CursorRows = 2
-	return repoRow
-}
-
-// metaRow is the second, muted line under each repo: its local checkout.
-func (v *repoPickerView) metaRow(a *app, r *Repository) Row {
-	key := repoDirKey(a.ctx.Workspace, r.Slug)
-	switch {
-	case a.cloneInFlight[r.FullName]:
-		return textRow(
-			Span{listItemDivider, styleDim},
-			Span{"◌ clone中… → " + shortenHome(cloneDestFor(a.cfg, r.Slug)), styleMeta},
-		)
-	case a.localDirs[key] != "":
-		return textRow(
-			Span{listItemDivider, styleDim},
-			Span{"● ", styleApproved},
-			Span{shortenHome(a.localDirs[key]), styleDim},
-		)
-	default:
-		return textRow(
-			Span{listItemDivider, styleDim},
-			Span{"○ ローカルなし（C でclone）", styleDim},
-		)
-	}
 }
 
 // fillFilter keeps pulling pages while a filter is on (see listView), capped
@@ -290,7 +271,7 @@ func (v *repoPickerView) maybeRemoteSearch(a *app) {
 }
 
 func pickerDescWidth(a *app) int {
-	w := a.w - 1 - pickerSlugWidth - 2 - 2 - pickerUpdatedWidth - 1
+	w := a.w - 1 - 2 - pickerSlugWidth - 2 - 2 - pickerUpdatedWidth - 1
 	if w < 1 {
 		w = 1
 	}
@@ -309,10 +290,33 @@ func (v *repoPickerView) render(a *app, s *Screen) {
 	}
 	x = s.WriteString(x, 0, count, styleDim, a.w)
 	if q != "" {
-		s.WriteString(x, 0, "  /"+q, styleMeta, a.w)
+		x = s.WriteString(x, 0, "  /"+q, styleMeta, a.w)
 	}
+	v.paintCursorPath(a, s, x)
 	paintSeparator(s, 1, a.w)
 	v.vp.Paint(s, a.contentRect())
+}
+
+// paintCursorPath shows the cursor row's checkout path at the right edge of
+// the header (the rows themselves only carry the ● mark).
+func (v *repoPickerView) paintCursorPath(a *app, s *Screen, usedX int) {
+	r := v.currentRepo(a)
+	if r == nil {
+		return
+	}
+	dir := a.localDirs[repoDirKey(a.ctx.Workspace, r.Slug)]
+	if dir == "" {
+		return
+	}
+	path := shortenHome(dir)
+	avail := a.w - 1 - (usedX + 3) - 2 // gap after the counters, mark cells
+	if avail < 8 {
+		return
+	}
+	path = truncateWidthLeft(path, avail)
+	x := a.w - 1 - displayWidth(path) - 2
+	x = s.WriteString(x, 0, "● ", styleApproved, a.w)
+	s.WriteString(x, 0, path, styleDim, a.w)
 }
 
 func (v *repoPickerView) grabsKeys() bool { return v.search.active }

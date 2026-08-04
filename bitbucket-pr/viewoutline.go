@@ -74,7 +74,7 @@ func (v *detailView) ensureOutline(a *app, d *prDetail) {
 		}
 	}
 	if a.ctx.RepoDir == "" {
-		d.outlineErr = "ローカルcheckoutが関連付けられていません。C でcloneするか、対象リポジトリ内のペインからPRを開き直してください。"
+		d.outlineErr = "ローカルcheckoutが関連付けられていません。\nC でclone、または対象リポジトリ内のペインからPRを開き直してください。"
 		return
 	}
 	sourceHash := d.pr.Source.Commit.Hash
@@ -210,8 +210,14 @@ func (v *detailView) outlineRows(a *app, d *prDetail) []Row {
 		}
 	}
 	if d.outlineErr != "" {
+		// In split layout these rows land in the master column, so wrap to
+		// that width — the full terminal width would paint under the preview.
+		wrapWidth := a.w
+		if outlineSplit(a.w) {
+			wrapWidth = outlineMasterWidth(a.w)
+		}
 		rows := []Row{textRow(Span{" Outlineは利用できません", styleError}), textRow()}
-		for _, line := range wrapText(d.outlineErr, max(a.w-4, 20)) {
+		for _, line := range wrapText(d.outlineErr, max(wrapWidth-4, 20)) {
 			rows = append(rows, textRow(Span{"  " + line, styleNone}))
 		}
 		rows = append(rows, textRow(), textRow(Span{" 他のタブは通常どおり利用できます", styleDim}))
