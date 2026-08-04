@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -80,7 +81,7 @@ func TestRepoPickerRemoteResultsAppendDeduped(t *testing.T) {
 	v := &repoPickerView{
 		remoteQuery: "gate",
 		remoteResults: []Repository{
-			{Slug: "gateway", FullName: "ws/gateway"},       // duplicate of the local page
+			{Slug: "gateway", FullName: "ws/gateway"},         // duplicate of the local page
 			{Slug: "gate-keeper", FullName: "ws/gate-keeper"}, // genuinely remote-only
 		},
 	}
@@ -167,5 +168,51 @@ func TestRepoPickerCycleModeWraps(t *testing.T) {
 	v.cycleMode(a, -1)
 	if v.mode != pickerModeReviewing {
 		t.Fatalf("mode = %d, want reviewing (wrap)", v.mode)
+	}
+}
+
+func TestReviewScanSlugsMergesSourcesInPriorityOrder(t *testing.T) {
+	myPRs := []PullRequest{{ID: 1}, {ID: 2}}
+	myPRs[0].Destination.Repository.FullName = "ws/from-my-pr"
+	myPRs[1].Destination.Repository.FullName = "ws/contrib-b" // dup of contributor
+	prev := []PullRequest{{ID: 3}}
+	prev[0].Destination.Repository.FullName = "ws/from-prev"
+	localDirs := map[string]string{
+		"ws/from-local": "/x/from-local",
+		"other/ignored": "/x/ignored", // different workspace
+	}
+	slugs, capped := reviewScanSlugs(
+		[]string{"contrib-a", "contrib-b"},
+		myPRs, localDirs, "ws", prev,
+		[]string{"pinned", "contrib-a"}, // pin dup of contributor
+	)
+	want := []string{"pinned", "contrib-a", "contrib-b", "from-my-pr", "from-local", "from-prev"}
+	if capped {
+		t.Error("capped = true, want false")
+	}
+	if len(slugs) != len(want) {
+		t.Fatalf("slugs = %v, want %v", slugs, want)
+	}
+	for i := range want {
+		if slugs[i] != want[i] {
+			t.Errorf("slugs[%d] = %s, want %s", i, slugs[i], want[i])
+		}
+	}
+}
+
+func TestReviewScanSlugsCapsAndKeepsPins(t *testing.T) {
+	var contributor []string
+	for i := 0; i < reviewScanCap+50; i++ {
+		contributor = append(contributor, fmt.Sprintf("repo-%d", i))
+	}
+	slugs, capped := reviewScanSlugs(contributor, nil, nil, "ws", nil, []string{"pinned"})
+	if !capped {
+		t.Error("capped = false, want true")
+	}
+	if len(slugs) != reviewScanCap {
+		t.Fatalf("len = %d, want %d", len(slugs), reviewScanCap)
+	}
+	if slugs[0] != "pinned" {
+		t.Errorf("slugs[0] = %s, pins must survive the cap", slugs[0])
 	}
 }

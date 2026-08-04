@@ -113,8 +113,49 @@ func (v *repoPickerView) crossList(a *app) *crossPRList {
 	}
 }
 
+// reviewScanCap bounds the Review scan's repository fan-out so a
+// misconfigured window cannot eat the API rate limit.
+const reviewScanCap = 300
+
+// reviewScanSlugs merges the Review view's scan sources in priority order,
+// deduplicated and capped: contributor repos (recently pushed), repos of the
+// user's own PRs, local checkouts, repos seen in the previous Review result
+// (sticky), and configured pins. Reports whether the cap truncated the set.
+func reviewScanSlugs(contributor []string, myPRs []PullRequest, localDirs map[string]string, ws string, prev []PullRequest, extras []string) ([]string, bool) {
+	seen := map[string]bool{}
+	var out []string
+	add := func(slug string) {
+		if slug != "" && !seen[slug] {
+			seen[slug] = true
+			out = append(out, slug)
+		}
+	}
+	for _, s := range extras { // pins first: they must survive the cap
+		add(s)
+	}
+	for _, s := range contributor {
+		add(s)
+	}
+	for i := range myPRs {
+		add(myPRs[i].RepoSlug())
+	}
+	for key := range localDirs {
+		if s, ok := strings.CutPrefix(key, ws+"/"); ok {
+			add(s)
+		}
+	}
+	for i := range prev {
+		add(prev[i].RepoSlug())
+	}
+	if len(out) > reviewScanCap {
+		return out[:reviewScanCap], true
+	}
+	return out, false
+}
+
 // loadCrossPRs fetches one cross-repo dashboard (SWR: the disk cache paints
-// first). kind is "mine" or "reviewing".
+// first). kind is "mine" or "reviewing". The reviewing fetch also loads the
+// user's own PRs — they seed the scan set and warm the My PRs tab.
 func (v *repoPickerView) loadCrossPRs(a *app, list *crossPRList, kind string, force bool) {
 	ws := a.ctx.Workspace
 	list.gen++
@@ -125,48 +166,62 @@ func (v *repoPickerView) loadCrossPRs(a *app, list *crossPRList, kind string, fo
 			list.prs = cached
 		}
 	}
-	// Capture what the Review scan needs up front; the work closure must not
-	// touch app state off the main goroutine.
-	scanLimit := a.cfg.ReviewScanRepos
-	slugs := make([]string, 0, scanLimit)
-	for i := range a.repos {
-		if len(slugs) == scanLimit {
-			break
-		}
-		slugs = append(slugs, a.repos[i].Slug)
+	// Capture everything the work closure needs up front; it must not touch
+	// app state off the main goroutine.
+	localDirs := make(map[string]string, len(a.localDirs))
+	for k, d := range a.localDirs {
+		localDirs[k] = d
 	}
+	prev := append([]PullRequest(nil), a.reviewPRs.prs...)
+	extras := a.cfg.ReviewExtraRepos
+	scanDays := a.cfg.ReviewScanDays
 	client := a.client
+	resultCh := a.resultCh
 	a.fetch("cross prs "+kind, func() (func(*app), error) {
 		uuid, err := client.currentUserUUID()
 		var (
 			prs    []PullRequest
+			myPRs  []PullRequest
 			failed []string
+			capped bool
 		)
 		if err == nil {
 			if kind == "mine" {
 				prs, err = client.listMyPRs(ws, uuid)
 			} else {
-				if len(slugs) == 0 {
-					// Launched straight into Review (open-review-prs): the
-					// repo list has not been fetched yet — get it here.
-					repos, _, listErr := client.listReposPage(client.listReposFirstURL(ws, ""))
-					if listErr != nil {
-						err = listErr
-					} else {
-						for i := range repos {
-							if len(slugs) == scanLimit {
-								break
-							}
-							slugs = append(slugs, repos[i].Slug)
-						}
-					}
+				var contributor []string
+				myPRs, err = client.listMyPRs(ws, uuid)
+				if err == nil {
+					contributor, err = client.listContributorRepoSlugs(ws, scanDays)
 				}
 				if err == nil {
-					prs, failed, err = client.listReviewingPRs(ws, uuid, slugs)
+					var slugs []string
+					slugs, capped = reviewScanSlugs(contributor, myPRs, localDirs, ws, prev, extras)
+					// Stream scan progress to the footer; drop updates rather
+					// than block when the main loop is busy.
+					progress := func(done, total int) {
+						update := func(a *app) {
+							if list.gen == gen {
+								a.status = fmt.Sprintf("Review走査中… %d/%d リポジトリ", done, total)
+							}
+						}
+						select {
+						case resultCh <- update:
+						default:
+						}
+					}
+					prs, failed, err = client.listReviewingPRs(ws, uuid, slugs, progress)
 				}
 			}
 		}
 		return func(a *app) {
+			if kind == "reviewing" && myPRs != nil {
+				// Free warm-up: the scan already fetched the user's own PRs.
+				a.myPRs.prs = myPRs
+				a.myPRs.loaded = true
+				a.myPRs.err = ""
+				saveCrossPRCache(ws, "mine", myPRs)
+			}
 			if list.gen != gen {
 				return
 			}
@@ -181,9 +236,15 @@ func (v *repoPickerView) loadCrossPRs(a *app, list *crossPRList, kind string, fo
 			}
 			list.prs = prs
 			list.loaded = true
+			a.status = ""
+			var notes []string
 			if len(failed) > 0 {
-				list.note = fmt.Sprintf("%d件のリポジトリで取得に失敗", len(failed))
+				notes = append(notes, fmt.Sprintf("%d件のリポジトリで取得に失敗", len(failed)))
 			}
+			if capped {
+				notes = append(notes, fmt.Sprintf("走査対象が上限%d件を超えたため一部を省略", reviewScanCap))
+			}
+			list.note = strings.Join(notes, " / ")
 			saveCrossPRCache(ws, kind, prs)
 			v.rebuild(a)
 		}, nil
@@ -387,7 +448,7 @@ func (v *repoPickerView) rebuildCrossPRs(a *app, list *crossPRList) {
 		case a.loading > 0 && !list.loaded:
 			rows = append(rows, textRow(Span{" 読み込み中…", styleDim}))
 			if v.mode == pickerModeReviewing {
-				rows = append(rows, textRow(Span{fmt.Sprintf(" 更新順上位%d件のリポジトリを問い合わせています", a.cfg.ReviewScanRepos), styleDim}))
+				rows = append(rows, textRow(Span{fmt.Sprintf(" 書き込み権限のある直近%d日更新のリポジトリを問い合わせています（進捗はフッタに表示）", a.cfg.ReviewScanDays), styleDim}))
 			}
 		case list.err != "":
 			rows = append(rows, textRow(Span{" 取得に失敗しました（r で再読込）: " + list.err, styleDim}))

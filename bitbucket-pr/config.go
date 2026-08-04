@@ -29,10 +29,11 @@ type Config struct {
 	CloneProtocol string   `toml:"clone_protocol"` // ssh | https
 	CloneArgs     []string `toml:"clone_args"`     // extra git clone flags, e.g. ["--filter=blob:none"]
 
-	// ReviewScanRepos bounds the picker's Review view: Bitbucket has no
-	// cross-repo "PRs I review" endpoint, so the N most recently updated
-	// repositories are queried individually.
-	ReviewScanRepos int `toml:"review_scan_repos"`
+	// The picker's Review view scans repositories the user can write to
+	// that were pushed within ReviewScanDays, plus ReviewExtraRepos pins
+	// (for read-only repos the contributor filter cannot see).
+	ReviewScanDays   int      `toml:"review_scan_days"`
+	ReviewExtraRepos []string `toml:"review_extra_repos"`
 
 	Placement        string            `toml:"placement"`        // tab | split | zoomed | overlay
 	ListTabTitle     string            `toml:"list_tab_title"`   // viewer tab label: {repo} {workspace}
@@ -74,7 +75,7 @@ func defaultConfig() Config {
 	return Config{
 		DefaultState:      "OPEN",
 		CloneProtocol:     "ssh",
-		ReviewScanRepos:   30,
+		ReviewScanDays:    30,
 		Placement:         "tab",
 		ListTabTitle:      "PRs {repo}",
 		ShowComments:      true,
@@ -127,8 +128,8 @@ func loadConfig() Config {
 	if cfg.CloneProtocol != "https" {
 		cfg.CloneProtocol = defaultConfig().CloneProtocol
 	}
-	if cfg.ReviewScanRepos < 1 || cfg.ReviewScanRepos > 100 {
-		cfg.ReviewScanRepos = defaultConfig().ReviewScanRepos
+	if cfg.ReviewScanDays < 7 || cfg.ReviewScanDays > 365 {
+		cfg.ReviewScanDays = defaultConfig().ReviewScanDays
 	}
 	switch cfg.Placement {
 	case "tab", "split", "zoomed", "overlay":

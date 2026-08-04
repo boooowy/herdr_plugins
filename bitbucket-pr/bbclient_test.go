@@ -618,7 +618,9 @@ func TestListReviewingPRsMergesAndReportsFailures(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	prs, failed, err := testClient(srv).listReviewingPRs("ws", "{abc}", []string{"repo-a", "repo-b", "repo-c"})
+	var progressCalls, lastDone, lastTotal int
+	prs, failed, err := testClient(srv).listReviewingPRs("ws", "{abc}", []string{"repo-a", "repo-b", "repo-c"},
+		func(done, total int) { progressCalls++; lastDone, lastTotal = done, total })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,5 +629,35 @@ func TestListReviewingPRsMergesAndReportsFailures(t *testing.T) {
 	}
 	if len(failed) != 1 || failed[0] != "repo-c" {
 		t.Errorf("failed = %v", failed)
+	}
+	if progressCalls != 3 || lastDone != 3 || lastTotal != 3 {
+		t.Errorf("progress = %d calls, last %d/%d, want 3 calls ending 3/3", progressCalls, lastDone, lastTotal)
+	}
+}
+
+func TestListContributorRepoSlugsBuildsQuery(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/repositories/ws", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("role") != "contributor" || q.Get("sort") != "-updated_on" {
+			t.Errorf("role/sort: %v", q)
+		}
+		if !strings.HasPrefix(q.Get("q"), `updated_on>="`) {
+			t.Errorf("q = %q, want updated_on cutoff", q.Get("q"))
+		}
+		if q.Get("fields") != "next,values.slug" {
+			t.Errorf("fields = %q", q.Get("fields"))
+		}
+		fmt.Fprint(w, `{"values":[{"slug":"repo-a"},{"slug":"repo-b"}]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	slugs, err := testClient(srv).listContributorRepoSlugs("ws", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slugs) != 2 || slugs[0] != "repo-a" || slugs[1] != "repo-b" {
+		t.Errorf("slugs = %v", slugs)
 	}
 }
