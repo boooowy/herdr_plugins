@@ -49,7 +49,7 @@ var helpByCtx = map[string]struct {
 		{"c", "コメント投稿 (Comments のコメント上ではそこへ返信 — 返信行なら入れ子返信)"},
 		{"x", "Comments: 選択コメントを削除 (y で確定)"},
 		{"s", "Comments: スレッドを resolve / 再オープン (インラインのみ)"},
-		{"m / M", "メモ追加 (Files: 選択ファイル / Comments: 選択スレッドの行 / 他: PR全体) / Memoタブへ"},
+		{"m / M", "メモ追加 (Files: 選択ファイル / Outline: 選択シンボル / Comments: 選択スレッドの行 / 他: PR全体) / Memoタブへ"},
 		{"d / e", "Memo: メモを削除 (y で確定) / エディタで再編集"},
 		{"a / A / X", "PRを承認 / 自分の承認取消 / Decline (yで確定、OPENのみ)"},
 		{"D", "PR全体のdiffをdiffツールで開く"},

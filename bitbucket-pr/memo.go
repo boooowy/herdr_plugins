@@ -103,6 +103,35 @@ func memoFromAnchor(files []FileDiff, in *InlineAnchor) reviewMemo {
 	}
 }
 
+// memoFromSymbol anchors a memo to an Outline symbol's definition line (the
+// same line the Outline's Enter jumps to), snapshotting it when the line is
+// in the diff. Symbols without line info degrade to a whole-file anchor.
+func memoFromSymbol(files []FileDiff, s *outlineSymbol) reviewMemo {
+	path := s.Path
+	if path == "" {
+		path = s.OldPath
+	}
+	var oldRange, newRange []int
+	switch {
+	case s.Change == outlineRemoved && s.OldStartLine > 0:
+		oldRange = []int{s.OldStartLine, s.OldStartLine}
+	case s.StartLine > 0:
+		newRange = []int{s.StartLine, s.StartLine}
+	default:
+		return fileMemo(path)
+	}
+	if lines := linesInRange(fileDiffFor(files, path), oldRange, newRange); len(lines) > 0 {
+		return memoFromDiff(path, lines, "")
+	}
+	return reviewMemo{
+		ID:        time.Now().UnixNano(),
+		Path:      path,
+		OldRange:  oldRange,
+		NewRange:  newRange,
+		CreatedOn: time.Now(),
+	}
+}
+
 // anchorRanges maps an inline anchor onto [start, end] side ranges (new
 // side wins, mirroring anchorLabel).
 func anchorRanges(in *InlineAnchor) (oldRange, newRange []int) {

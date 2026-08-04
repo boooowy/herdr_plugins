@@ -269,6 +269,32 @@ func TestDetailMemoContext(t *testing.T) {
 		t.Errorf("comments-tab excerpt: %q", m.Excerpt)
 	}
 
+	// Outline tab: a symbol row anchors to its definition line.
+	v.tab = tabOutline
+	d.outline = &outlineResult{Files: []outlineFile{{
+		Path:    "a.go",
+		Symbols: []outlineSymbol{{ID: "s1", Path: "a.go", Name: "NewFoo", StartLine: 10}},
+	}}}
+	v.vp[tabOutline].Reset([]Row{row(RowOutlineSymbol,
+		outlineRowRef{Kind: "symbol", Path: "a.go", ID: "s1"}, true, Span{"x", styleNone})})
+	m, target = v.memoContext(a)
+	if m.Path != "a.go" || !intsEqual(m.NewRange, []int{10, 10}) {
+		t.Errorf("outline symbol context: %+v", m)
+	}
+	if strings.Join(m.Excerpt, "\n") != "+ added" {
+		t.Errorf("outline symbol excerpt: %q", m.Excerpt)
+	}
+	if !strings.Contains(target, "NewFoo") {
+		t.Errorf("outline symbol target: %q", target)
+	}
+
+	// Outline tab: a file row anchors to the file.
+	v.vp[tabOutline].Reset([]Row{row(RowOutlineFile,
+		outlineRowRef{Kind: "file", Path: "a.go"}, true, Span{"x", styleNone})})
+	if m, _ = v.memoContext(a); m.Path != "a.go" || m.lineLabel() != "" {
+		t.Errorf("outline file context: %+v", m)
+	}
+
 	// Elsewhere: PR-level fallback.
 	v.tab = tabOverview
 	if m, _ = v.memoContext(a); m.Path != "" {

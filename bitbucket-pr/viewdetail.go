@@ -319,10 +319,11 @@ func (v *detailView) composeMemo(a *app) {
 }
 
 // memoContext resolves what a new memo anchors to. Files tab: the file
-// under the cursor. Comments tab: a file header row anchors to its file, a
-// thread row to the thread's file + line range (with the diff excerpt
-// snapshotted). Everything else — general threads included — falls back to
-// a PR-level memo.
+// under the cursor. Outline tab: a symbol row anchors to its definition
+// line, dir/file/tests rows to their path. Comments tab: a file header row
+// anchors to its file, a thread row to the thread's file + line range (with
+// the diff excerpt snapshotted). Everything else — general threads included
+// — falls back to a PR-level memo.
 func (v *detailView) memoContext(a *app) (reviewMemo, string) {
 	d := a.detailFor(v.prID)
 	switch v.tab {
@@ -331,6 +332,20 @@ func (v *detailView) memoContext(a *app) (reviewMemo, string) {
 			if i, ok := r.Item.(int); ok && i >= 0 && i < len(d.diffstat) {
 				path := d.diffstat[i].Path()
 				return fileMemo(path), path + " へのメモ"
+			}
+		}
+	case tabOutline:
+		if s := v.currentOutlineSymbol(a); s != nil {
+			m := memoFromSymbol(d.files, s)
+			label := ""
+			if l := m.lineLabel(); l != "" {
+				label = " " + l
+			}
+			return m, m.Path + label + " (" + s.Name + ") へのメモ"
+		}
+		if r := v.vp[tabOutline].Current(); r != nil {
+			if ref, ok := r.Item.(outlineRowRef); ok && ref.Path != "" {
+				return fileMemo(ref.Path), ref.Path + " へのメモ"
 			}
 		}
 	case tabComments:
@@ -1402,6 +1417,8 @@ func (v *detailView) footer(a *app) string {
 	}
 	if v.tab == tabMemo {
 		base += "Enter:コードへ  y:全メモをMDコピー  d:削除  e:編集  m:PR全体メモ  "
+	} else {
+		base += "m:メモ  "
 	}
 	cKey := "c:コメント"
 	if v.tab == tabComments {
