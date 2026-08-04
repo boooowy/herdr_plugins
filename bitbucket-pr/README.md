@@ -7,7 +7,7 @@ PR 一覧 → 詳細（説明・変更シンボル・レビュアー・変更フ
 merge は非対応です（`o` でブラウザへ）。
 
 - plugin ID: `boooowy.bitbucket-pr`
-- version: `0.23.0`
+- version: `0.24.0`
 - platforms: macOS / Linux
 
 Files タブでファイルを Enter すると、PR 全体の diff が**外部 diff ツール**
@@ -193,7 +193,7 @@ export JIRA_API_TOKEN="<Jiraスコープを持つAPIトークン>"
 
 ## 使い方
 
-起動方法は3つ:
+起動方法は4つ:
 
 1. **キーバインド（推奨）** — `~/.config/herdr/config.toml` に例えば:
 
@@ -209,10 +209,13 @@ description = "Bitbucket PR: open viewer for current repo"
    フォーカス中ペインの作業ディレクトリの `git remote origin` からリポジトリを自動判別し、
    PR 一覧を新しいタブで開きます。
 
-2. **リポジトリピッカー** — `boooowy.bitbucket-pr.open-picker` をキーバインドすると、
-   workspace のリポジトリ一覧（更新順）を検索して選ぶ画面から起動できます。
-   ローカル checkout が無いリポジトリの PR もそのまま閲覧でき（Outline のみ不可）、
-   `C` で選択制の `git clone` もできます。詳細は「リポジトリピッカー」節を参照。
+2. **リポジトリピッカー / 横断PRビュー** — `boooowy.bitbucket-pr.open-picker` を
+   キーバインドすると、workspace のリポジトリ一覧（更新順）を検索して選ぶ画面から
+   起動できます。同じ画面で `Tab` を押すと **My PRs（自分が作成したPR）/
+   Review（レビュー待ちPR）** の横断ビューに切り替わります（`open-my-prs` /
+   `open-review-prs` action で直接起動も可能）。ローカル checkout が無い
+   リポジトリの PR もそのまま閲覧でき（Outline のみ不可）、`C` で選択制の
+   `git clone` もできます。詳細は「リポジトリピッカー」節を参照。
    通常の `open` でリポジトリを判別できなかったときも、workspace が分かれば
    自動的にこのピッカーへフォールバックします。
 
@@ -225,31 +228,58 @@ description = "Bitbucket PR: open viewer for current repo"
 ```sh
 herdr plugin action invoke open --plugin boooowy.bitbucket-pr
 herdr plugin action invoke open-picker --plugin boooowy.bitbucket-pr
+herdr plugin action invoke open-my-prs --plugin boooowy.bitbucket-pr
+herdr plugin action invoke open-review-prs --plugin boooowy.bitbucket-pr
 ```
 
 ### リポジトリピッカー
 
 ```text
- Bitbucket リポジトリ — myworkspace   48件+
+ Bitbucket — myworkspace   Repos  My PRs  Review   48件+   ● ~/Documents/workspace/my-app
 ──────────────────────────────────────────────────────────────────────
- my-app                        BFFのGoサービス                 3日前
-  ────  ● ~/Documents/workspace/my-app
- legacy-batch                  (説明なし)                     2週間前
-  ────  ○ ローカルなし（C でclone）
+ ● my-app                       BFFのGoサービス                 3日前
+   legacy-batch                                                2週間前
+ ◌ cloning-now                  大きいリポジトリ                1ヶ月前
 ──────────────────────────────────────────────────────────────────────
- j/k:移動  Enter:PR一覧  /:検索  C:clone  o:ブラウザ  y:clone URL  r:再読込  q:終了
+ j/k:移動  Enter:PR一覧  Tab:ビュー切替  /:検索  C:clone  o:ブラウザ  y:clone URL  r:再読込  q:終了
 ```
 
 - 一覧は**更新が新しい順**で、カーソルが末尾に近づくと次のページを自動取得します。
   `/` の絞り込み中に取得済みページで足りなければサーバー側の名前検索（`q=name~`）も
   併用し、まだページインしていないリポジトリもヒットします。
-- 各リポジトリの2行目に**ローカル checkout の有無**を表示します。判別は
+- 行頭マークが**ローカル checkout の有無**です（`●` あり / `◌` clone中 / 空白 なし）。
+  カーソル行の checkout パスはヘッダ右端に表示されます。判別は
   config の `repo_roots` 配下の走査（`.git/config` の origin を読む）と、
   プラグインが学習した対応表（`repo-dirs.json` — 通常起動や clone のたびに育つ）の
   マージです。
 - `Enter` で PR 一覧へ。checkout が無くても Overview / Files / Comments / diff は
   全て使えます（Outline のみ「C でclone」を案内）。`q`/`Esc` で PR 一覧から
   ピッカーへ戻り、別リポジトリへ切り替えられます。
+
+### My PRs / Review（横断PRビュー）
+
+Bitbucket トップの「Your pull requests」「Pull requests to review」相当です。
+ピッカーで `Tab`（または `1`-`3`）でビューを切り替えます。
+
+```text
+ Bitbucket — myworkspace   Repos  My PRs  Review   12件
+──────────────────────────────────────────────────────────────────────
+ #2157   engine-deploy      mnavi-kddi固定mainnet対応の解除…  田谷 瑛悟   15時間前
+ #7095   argocd-jenkins     jenkinsfilePathだけフェッチする…  久保田 友也  21時間前
+──────────────────────────────────────────────────────────────────────
+ j/k:移動  Enter:PR詳細  Tab:ビュー切替  /:検索  C:clone  o:ブラウザ  y:URL  r:再読込  q:終了
+```
+
+- **My PRs**: `/2.0/workspaces/{ws}/pullrequests/{自分のUUID}` で自分が作成した
+  OPEN の PR を1リクエストで横断取得します（更新順、最大200件）。
+- **Review**: Bitbucket の公開APIには「自分がレビュアーのPR」を横断取得する
+  エンドポイントが**存在しない**ため、**更新順上位 N 件のリポジトリ**
+  （`review_scan_repos`、既定30）へ個別に問い合わせて結合しています。
+  初回は数秒かかりますが、結果はキャッシュされ次回から即表示されます。
+  取得に失敗したリポジトリがあれば件数を警告表示します。
+- `Enter` で **PR詳細に直行**します（リポジトリのコンテキストは内部で切替）。
+  `q`/`Esc` で横断一覧に戻ります。`/` は番号・リポジトリ名・タイトル・著者・
+  ブランチで絞り込み。`C` はその PR のリポジトリを clone します。
 - `C` は確認モーダル（`y` で実行）後に `git clone` を非同期実行します。clone 先は
   `clone_dir`（未設定なら `repo_roots` の先頭）`/<repo>`。既に同名の checkout が
   あれば clone せず関連付けだけ行います。完了時は herdr のトースト通知が出ます。
@@ -341,6 +371,7 @@ repo_roots = []          # ローカルcheckoutの探索ルート（例: ["~/Doc
 clone_dir = ""           # C キーの clone 先。未設定なら repo_roots の先頭
 clone_protocol = "ssh"   # ssh | https（httpsは git credential helper の設定が必要）
 clone_args = []          # git clone の追加フラグ（例: ["--filter=blob:none"]。--depth は非推奨）
+review_scan_repos = 30   # Reviewビューが問い合わせる更新順上位リポジトリ数（1〜100）
 placement = "tab"        # tab | split | zoomed | overlay — ビューア自体の配置
 list_tab_title = "PRs {repo}"  # ビューアの herdr タブ名。{repo} {workspace} が使える
 show_comments = true     # diff 内インラインコメントの初期表示
@@ -406,6 +437,10 @@ outdated_fg = "yellow"
   そのリポジトリ内のペインから一度 `open` すれば学習されて以後表示されます。
 - ピッカーで別リポジトリへ切り替えると、前のリポジトリで開いた外部 diff ツールのタブは
   追跡対象から外れます（タブ自体は残ります）。
+- Review ビューは公開APIの制約（レビュアー横断エンドポイントが無い）により
+  `review_scan_repos` 件のリポジトリしか見ません。それより古いリポジトリの
+  レビュー依頼は表示されないため、漏れなく確認したい場合はブラウザの
+  Bitbucket ダッシュボードを併用してください。My PRs は全リポジトリ横断です。
 - 起動時は前回取得した一覧を即表示し、裏で最新に更新します
   （キャッシュは plugin の state ディレクトリ配下 `cache/`）。
 - アバターは中央を正方形に切り出して state ディレクトリ配下へ無期限で保存します。
