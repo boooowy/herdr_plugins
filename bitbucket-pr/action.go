@@ -13,19 +13,17 @@ const pluginID = "boooowy.bitbucket-pr"
 // The viewer's own HERDR_PANE_ID is the viewer pane itself, so everything it
 // needs must travel explicitly.
 const (
-	envWorkspace  = "BITBUCKET_PR_WORKSPACE"
-	envRepo       = "BITBUCKET_PR_REPO"
-	envPRID       = "BITBUCKET_PR_PR_ID"
-	envRepoDir    = "BITBUCKET_PR_REPO_DIR"
-	envMode       = "BITBUCKET_PR_MODE"        // "picker" starts at the repo picker
-	envPickerView = "BITBUCKET_PR_PICKER_VIEW" // picker's initial view: "" (repos) | "mine" | "reviewing"
+	envWorkspace = "BITBUCKET_PR_WORKSPACE"
+	envRepo      = "BITBUCKET_PR_REPO"
+	envPRID      = "BITBUCKET_PR_PR_ID"
+	envRepoDir   = "BITBUCKET_PR_REPO_DIR"
+	envMode      = "BITBUCKET_PR_MODE" // "picker" starts at the repo picker
 )
 
 // runAction is the palette/keybinding/link-handler entrypoint. It runs
 // server-side (no terminal): resolve which repo (and optionally which PR) to
 // show, then ask herdr to open the viewer pane with that context in env.
-// args[0] == "picker" skips repo resolution and opens the repo picker;
-// args[1] optionally selects its initial view ("mine" | "reviewing").
+// args[0] == "picker" skips repo resolution and opens the repo picker.
 func runAction(args []string) {
 	client, err := newHerdrClient()
 	if err != nil {
@@ -33,10 +31,6 @@ func runAction(args []string) {
 	}
 	cfg := loadConfig()
 	picker := len(args) > 0 && args[0] == "picker"
-	pickerView := ""
-	if picker && len(args) > 1 && (args[1] == "mine" || args[1] == "reviewing") {
-		pickerView = args[1]
-	}
 
 	var workspace, repo, repoDir string
 	prID := 0
@@ -106,9 +100,6 @@ func runAction(args []string) {
 	}
 	if picker {
 		env[envMode] = "picker"
-	}
-	if pickerView != "" {
-		env[envPickerView] = pickerView
 	}
 	if repoDir != "" {
 		env[envRepoDir] = repoDir
@@ -183,21 +174,19 @@ func resolveRepoContext(client *herdrClient, cfg Config) repoContext {
 // uiContext is the launch context the action passed via env, read by the ui
 // subcommand.
 type uiContext struct {
-	Workspace  string
-	Repo       string // "" in picker mode until the user selects one
-	RepoDir    string
-	PRID       int    // 0 = start at the PR list
-	Mode       string // "" | "picker"
-	PickerView string // "" (repos) | "mine" | "reviewing"
+	Workspace string
+	Repo      string // "" in picker mode until the user selects one
+	RepoDir   string
+	PRID      int    // 0 = start at the PR list
+	Mode      string // "" | "picker"
 }
 
 func uiContextFromEnv() (uiContext, error) {
 	ctx := uiContext{
-		Workspace:  os.Getenv(envWorkspace),
-		Repo:       os.Getenv(envRepo),
-		RepoDir:    os.Getenv(envRepoDir),
-		Mode:       os.Getenv(envMode),
-		PickerView: os.Getenv(envPickerView),
+		Workspace: os.Getenv(envWorkspace),
+		Repo:      os.Getenv(envRepo),
+		RepoDir:   os.Getenv(envRepoDir),
+		Mode:      os.Getenv(envMode),
 	}
 	if ctx.Workspace == "" || (ctx.Repo == "" && ctx.Mode != "picker") {
 		return ctx, fmt.Errorf("missing %s/%s; launch me via the action", envWorkspace, envRepo)

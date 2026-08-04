@@ -7,9 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -24,11 +22,6 @@ type bbClient struct {
 	token string
 	base  string // API root; overridden in tests
 	http  *http.Client
-
-	// userUUID caches the authenticated account's UUID for the cross-repo
-	// PR views (memory first, then the disk cache, then GET /user).
-	uuidMu   sync.Mutex
-	userUUID string
 }
 
 func newBBClient(email, token string, timeout time.Duration) *bbClient {
@@ -427,127 +420,6 @@ func (c *bbClient) listReposPage(pageURL string) (repos []Repository, next strin
 		return nil, "", err
 	}
 	return pg.Values, pg.Next, nil
-}
-
-// crossPRFields extends the PR-list payload with the owning repository —
-// the cross-repo views (My PRs / Review) render and navigate by it.
-const crossPRFields = listPRFields + ",values.destination.repository.full_name"
-
-// crossPRMaxPages caps the cross-repo lists: they are dashboards, not
-// exhaustive archives.
-const crossPRMaxPages = 4
-
-// currentUserUUID resolves the authenticated account's UUID, cached in
-// memory and on disk (keyed by email, so switching accounts refetches).
-func (c *bbClient) currentUserUUID() (string, error) {
-	c.uuidMu.Lock()
-	defer c.uuidMu.Unlock()
-	if c.userUUID != "" {
-		return c.userUUID, nil
-	}
-	if uuid := loadUserUUIDCache(c.email); uuid != "" {
-		c.userUUID = uuid
-		return uuid, nil
-	}
-	var out struct {
-		UUID string `json:"uuid"`
-	}
-	if err := c.getJSON(c.base+"/user?fields=uuid", &out); err != nil {
-		return "", err
-	}
-	if out.UUID == "" {
-		return "", fmt.Errorf("bitbucket api: /user returned no uuid")
-	}
-	saveUserUUIDCache(c.email, out.UUID)
-	c.userUUID = out.UUID
-	return out.UUID, nil
-}
-
-// listMyPRs returns the user's open PRs across the workspace, newest first
-// (the "Your pull requests" dashboard). One endpoint covers all repos.
-func (c *bbClient) listMyPRs(ws, uuid string) ([]PullRequest, error) {
-	u := fmt.Sprintf("%s/workspaces/%s/pullrequests/%s?state=OPEN&pagelen=50&fields=%s",
-		c.base, url.PathEscape(ws), url.PathEscape(uuid), url.QueryEscape(crossPRFields))
-	prs, err := getAll[PullRequest](c, u, crossPRMaxPages)
-	if err != nil {
-		return nil, err
-	}
-	sortPRsByUpdated(prs)
-	return prs, nil
-}
-
-// listContributorRepoSlugs returns the slugs of repositories the user can
-// write to that saw any push within the last `days` days, most recent
-// first. This is the Review view's scan universe: Bitbucket has no
-// cross-repo "PRs I review" endpoint, and scanning every workspace repo
-// would blow the API rate limit, but review requests realistically come
-// from repositories one contributes to.
-func (c *bbClient) listContributorRepoSlugs(ws string, days int) ([]string, error) {
-	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02T15:04:05") + "+00:00"
-	query := fmt.Sprintf(`updated_on>="%s"`, cutoff)
-	u := fmt.Sprintf("%s/repositories/%s?role=contributor&pagelen=100&sort=-updated_on&q=%s&fields=%s",
-		c.base, url.PathEscape(ws), url.QueryEscape(query), url.QueryEscape("next,values.slug"))
-	type slugOnly struct {
-		Slug string `json:"slug"`
-	}
-	repos, err := getAll[slugOnly](c, u, 5)
-	if err != nil {
-		return nil, err
-	}
-	slugs := make([]string, 0, len(repos))
-	for _, r := range repos {
-		slugs = append(slugs, r.Slug)
-	}
-	return slugs, nil
-}
-
-// listReviewingPRs returns open PRs that list uuid as a reviewer, merged
-// newest-first ("Pull requests to review"). Each repository is queried
-// separately with a worker pool (see listContributorRepoSlugs for why);
-// failed repos are reported but do not sink the rest of the result.
-// progress (optional) is called after each repository completes.
-func (c *bbClient) listReviewingPRs(ws, uuid string, slugs []string, progress func(done, total int)) (prs []PullRequest, failed []string, err error) {
-	query := fmt.Sprintf(`state="OPEN" AND reviewers.uuid="%s"`, uuid)
-	var (
-		mu   sync.Mutex
-		wg   sync.WaitGroup
-		sem  = make(chan struct{}, 8)
-		done int
-	)
-	for _, slug := range slugs {
-		wg.Add(1)
-		go func(slug string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			u := c.repoURL(ws, slug, "/pullrequests?pagelen=50&q="+url.QueryEscape(query)+
-				"&fields="+url.QueryEscape(crossPRFields))
-			got, _, pageErr := c.listPRsPage(u)
-			mu.Lock()
-			defer mu.Unlock()
-			if pageErr != nil {
-				debugf("review prs %s: %v", slug, pageErr)
-				failed = append(failed, slug)
-			} else {
-				prs = append(prs, got...)
-			}
-			done++
-			if progress != nil {
-				progress(done, len(slugs))
-			}
-		}(slug)
-	}
-	wg.Wait()
-	if len(prs) == 0 && len(failed) > 0 && len(failed) == len(slugs) {
-		return nil, failed, fmt.Errorf("全%d件のリポジトリで取得に失敗しました", len(slugs))
-	}
-	sortPRsByUpdated(prs)
-	sort.Strings(failed)
-	return prs, failed, nil
-}
-
-func sortPRsByUpdated(prs []PullRequest) {
-	sort.SliceStable(prs, func(i, j int) bool { return prs[i].UpdatedOn.After(prs[j].UpdatedOn) })
 }
 
 // repoDetailFields is repoListFields without the values. prefix, for the
