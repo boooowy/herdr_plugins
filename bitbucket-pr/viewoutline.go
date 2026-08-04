@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -103,10 +105,11 @@ func (v *detailView) ensureOutline(a *app, d *prDetail) {
 			}
 			current.outlineLoading = false
 			if analysisErr != nil {
-				current.outlineErr = outlineUserError(repoDir, sourceHash, destinationHash, analysisErr)
+				current.outlineErr, current.outlineFetchable = outlineUserError(repoDir, sourceHash, destinationHash, analysisErr)
 			} else {
 				current.outline = result
 				current.outlineErr = ""
+				current.outlineFetchable = false
 			}
 			v.rebuild(a)
 		}, nil
@@ -178,18 +181,108 @@ func (v *detailView) retryOutline(a *app) {
 	d := a.detailFor(v.prID)
 	d.outlineStarted, d.outlineLoading = false, false
 	d.outlineErr = ""
+	d.outlineFetchable = false
 	d.outline = nil
 	v.ensureOutline(a, d)
 	v.rebuild(a)
 }
 
-func outlineUserError(repoDir, sourceHash, destinationHash string, err error) string {
-	msg := err.Error()
-	if strings.Contains(msg, "がローカルにありません") {
-		return fmt.Sprintf("PRのcommitがローカルにありません。%s でPRブランチをfetchしてから r で再読込してください。 (%s → %s)",
-			repoDir, shortHash(destinationHash), shortHash(sourceHash))
+// beginOutlineFetch opens the y/n confirmation for fetching the PR's branches
+// into the associated checkout. Reached from the Outline tab's "commit
+// missing locally" state (typically a stale clone whose destination branch
+// has since moved).
+func (v *detailView) beginOutlineFetch(a *app) {
+	if v.pendingAction.kind != detailActionNone {
+		return
 	}
-	return "Outlineを解析できません: " + msg
+	d := a.detailFor(v.prID)
+	if !d.outlineFetchable || d.pr == nil || a.ctx.RepoDir == "" {
+		return
+	}
+	if a.fetchInFlight[a.ctx.RepoDir] {
+		a.status = "fetch実行中です: " + shortenHome(a.ctx.RepoDir)
+		return
+	}
+	v.pendingAction = pendingDetailAction{
+		kind:   detailActionFetch,
+		prompt: fmt.Sprintf("%s でoriginからPRのブランチをfetchしますか？", shortenHome(a.ctx.RepoDir)),
+	}
+}
+
+// runOutlineFetch fetches the PR's destination and source branches from
+// origin, then reruns the Outline analysis. Branches are fetched by name
+// (Bitbucket Cloud does not reliably serve want-by-SHA) and one at a time,
+// so a source branch origin doesn't have — fork PRs, deleted after merge —
+// cannot abort the destination update. The recheck after fetch reports any
+// still-missing commit honestly.
+func (v *detailView) runOutlineFetch(a *app) {
+	d := a.detailFor(v.prID)
+	repoDir := a.ctx.RepoDir
+	if d.pr == nil || repoDir == "" {
+		return
+	}
+	if a.fetchInFlight[repoDir] {
+		a.status = "fetch実行中です: " + shortenHome(repoDir)
+		return
+	}
+	var branches []string
+	for _, name := range []string{d.pr.Destination.Branch.Name, d.pr.Source.Branch.Name} {
+		if name != "" && (len(branches) == 0 || branches[0] != name) {
+			branches = append(branches, name)
+		}
+	}
+	if len(branches) == 0 {
+		a.status = "PRのブランチ名を取得できません"
+		return
+	}
+	a.fetchInFlight[repoDir] = true
+	a.fetch(fmt.Sprintf("outline fetch %d", v.prID), func() (func(*app), error) {
+		var fetched, failures []string
+		for _, branch := range branches {
+			cmd := exec.Command("git", "-C", repoDir, "fetch", "origin", branch)
+			// Never hang on an interactive credential prompt — fail fast and
+			// explain instead.
+			cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				failures = append(failures, branch+": "+lastOutputLine(out, err))
+				debugf("outline fetch %s %s: %v: %s", repoDir, branch, err, out)
+			} else {
+				fetched = append(fetched, branch)
+			}
+		}
+		return func(a *app) {
+			delete(a.fetchInFlight, repoDir)
+			if len(fetched) == 0 {
+				a.status = "fetchに失敗: " + strings.Join(failures, " / ")
+				return
+			}
+			if len(failures) > 0 {
+				a.status = "一部のブランチをfetchできませんでした: " + strings.Join(failures, " / ")
+			} else {
+				a.status = "fetchしました: origin " + strings.Join(fetched, " ")
+			}
+			v.retryOutline(a)
+		}, nil
+	})
+}
+
+// outlineUserError converts an analysis failure into the Outline tab's error
+// text. The bool reports whether F (fetch from origin) may resolve it — true
+// only for the missing-commit case.
+func outlineUserError(repoDir, sourceHash, destinationHash string, err error) (string, bool) {
+	msg := err.Error()
+	if !strings.Contains(msg, "がローカルにありません") {
+		return "Outlineを解析できません: " + msg, false
+	}
+	side, missing := "PRのcommit", ""
+	switch {
+	case destinationHash != "" && strings.Contains(msg, shortHash(destinationHash)):
+		side, missing = "マージ先ブランチのcommit", " "+shortHash(destinationHash)
+	case sourceHash != "" && strings.Contains(msg, shortHash(sourceHash)):
+		side, missing = "PRブランチのcommit", " "+shortHash(sourceHash)
+	}
+	return fmt.Sprintf("%s%s がローカルにありません。\nF でoriginからPRのブランチをfetchして再解析します（手動なら %s でfetchして r で再読込）。",
+		side, missing, shortenHome(repoDir)), true
 }
 
 func shortHash(hash string) string {
@@ -823,6 +916,9 @@ func (v *detailView) handleOutlineKey(a *app, k Key) bool {
 	switch {
 	case isKey(k, 'C') && a.ctx.RepoDir == "":
 		v.beginOutlineClone(a)
+		return true
+	case isKey(k, 'F') && a.detailFor(v.prID).outlineFetchable:
+		v.beginOutlineFetch(a)
 		return true
 	case isKey(k, 'g'):
 		v.outline.pendingG = true

@@ -42,6 +42,7 @@ var helpByCtx = map[string]struct {
 		{"gg / gd / gr", "Outline: 先頭 / 変更callee / 変更callerへ移動"},
 		{"Ctrl-o / Ctrl-i", "Outline: シンボル移動履歴を戻る / 進む"},
 		{"O", "Outline: 依存順 / アルファベット順を切替"},
+		{"C / F", "Outline: リポジトリをclone / 不足commitをfetch (y で確定)"},
 		{"Ctrl-d / Ctrl-u", "Outline/Comments: 右プレビューをスクロール"},
 		{"v", "内蔵diffビューアで開く (Filesタブ)"},
 		{"/", "絞り込み (Outline: シンボル/パス、Files: パス、Comments: 本文/著者/パス)"},

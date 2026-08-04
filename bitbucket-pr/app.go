@@ -26,10 +26,11 @@ type prDetail struct {
 	diffText string
 	files    []FileDiff
 
-	outlineStarted bool
-	outlineLoading bool
-	outline        *outlineResult
-	outlineErr     string
+	outlineStarted   bool
+	outlineLoading   bool
+	outline          *outlineResult
+	outlineErr       string
+	outlineFetchable bool // outlineErr is the missing-commit case F can resolve
 }
 
 // app owns the terminal, the view stack, and all fetched data. Every
@@ -67,6 +68,7 @@ type app struct {
 	reposMoreLoading bool
 	localDirs        map[string]string // "ws/repo" → checkout path (repo-dirs.json + repo_roots scan)
 	cloneInFlight    map[string]bool   // full_name → a clone is running
+	fetchInFlight    map[string]bool   // repoDir → a git fetch is running
 	viewerTabID      string            // viewer pane's own tab (renamed on repo selection); "" = unknown
 
 	difftoolPanes map[int]paneRef // PR id → its external diff tool tab
@@ -220,6 +222,7 @@ func runUI() {
 		difftoolPanes: map[int]paneRef{},
 		localDirs:     loadRepoDirIndex(),
 		cloneInFlight: map[string]bool{},
+		fetchInFlight: map[string]bool{},
 	}
 	if cfg.loadErr != "" {
 		a.status = cfg.loadErr
