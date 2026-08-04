@@ -523,3 +523,109 @@ func TestListReposPageAndGetRepo(t *testing.T) {
 		t.Errorf("getRepo clone url = %q", repo.CloneURL("https"))
 	}
 }
+
+func TestCurrentUserUUIDCachesOnDisk(t *testing.T) {
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
+	calls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/user", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		fmt.Fprint(w, `{"uuid":"{abc-123}"}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := testClient(srv)
+	for i := 0; i < 2; i++ {
+		uuid, err := c.currentUserUUID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if uuid != "{abc-123}" {
+			t.Errorf("uuid = %q", uuid)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("GET /user calls = %d, want 1 (memory cache)", calls)
+	}
+
+	// A fresh client (same email) must hit the disk cache, not the API.
+	c2 := testClient(srv)
+	if _, err := c2.currentUserUUID(); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Errorf("GET /user calls = %d, want 1 (disk cache)", calls)
+	}
+
+	// A different account must not reuse the cached identity.
+	c3 := testClient(srv)
+	c3.email = "other@example.com"
+	if _, err := c3.currentUserUUID(); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Errorf("GET /user calls = %d, want 2 (different email refetches)", calls)
+	}
+}
+
+func TestListMyPRsSortsNewestFirst(t *testing.T) {
+	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
+	mux := http.NewServeMux()
+	mux.HandleFunc("/2.0/workspaces/ws/pullrequests/{abc}", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != "OPEN" {
+			t.Errorf("state = %q, want OPEN", r.URL.Query().Get("state"))
+		}
+		if f := r.URL.Query().Get("fields"); !strings.Contains(f, "values.destination.repository.full_name") {
+			t.Errorf("fields must include the owning repository, got %q", f)
+		}
+		fmt.Fprint(w, `{"values":[
+			{"id":1,"updated_on":"2026-08-01T00:00:00Z","destination":{"repository":{"full_name":"ws/repo-a"}}},
+			{"id":2,"updated_on":"2026-08-03T00:00:00Z","destination":{"repository":{"full_name":"ws/repo-b"}}}]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	prs, err := testClient(srv).listMyPRs("ws", "{abc}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 2 || prs[0].ID != 2 || prs[1].ID != 1 {
+		t.Fatalf("prs = %+v, want newest first", prs)
+	}
+	if got := prs[0].RepoSlug(); got != "repo-b" {
+		t.Errorf("RepoSlug = %q", got)
+	}
+}
+
+func TestListReviewingPRsMergesAndReportsFailures(t *testing.T) {
+	mux := http.NewServeMux()
+	pr := func(id int, updated, repo string) string {
+		return fmt.Sprintf(`{"id":%d,"updated_on":"%s","destination":{"repository":{"full_name":"ws/%s"}}}`, id, updated, repo)
+	}
+	mux.HandleFunc("/2.0/repositories/ws/repo-a/pullrequests", func(w http.ResponseWriter, r *http.Request) {
+		if q := r.URL.Query().Get("q"); !strings.Contains(q, `reviewers.uuid="{abc}"`) || !strings.Contains(q, `state="OPEN"`) {
+			t.Errorf("q = %q", q)
+		}
+		fmt.Fprintf(w, `{"values":[%s]}`, pr(1, "2026-08-01T00:00:00Z", "repo-a"))
+	})
+	mux.HandleFunc("/2.0/repositories/ws/repo-b/pullrequests", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"values":[%s]}`, pr(2, "2026-08-03T00:00:00Z", "repo-b"))
+	})
+	mux.HandleFunc("/2.0/repositories/ws/repo-c/pullrequests", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	prs, failed, err := testClient(srv).listReviewingPRs("ws", "{abc}", []string{"repo-a", "repo-b", "repo-c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 2 || prs[0].ID != 2 || prs[1].ID != 1 {
+		t.Fatalf("prs = %+v, want merged newest first", prs)
+	}
+	if len(failed) != 1 || failed[0] != "repo-c" {
+		t.Errorf("failed = %v", failed)
+	}
+}

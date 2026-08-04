@@ -117,3 +117,55 @@ func TestRepoPickerEmptyStates(t *testing.T) {
 		t.Errorf("error state = %q", got)
 	}
 }
+
+func TestRepoPickerCrossPRModeRowsAndFilter(t *testing.T) {
+	a := pickerTestApp()
+	a.myPRs.prs = []PullRequest{
+		{ID: 100, Title: "fix timeout", UpdatedOn: time.Now()},
+		{ID: 200, Title: "add cache layer"},
+	}
+	a.myPRs.prs[0].Destination.Repository.FullName = "ws/repo-a"
+	a.myPRs.prs[1].Destination.Repository.FullName = "ws/repo-b"
+	a.myPRs.loaded = true
+
+	v := &repoPickerView{mode: pickerModeMine}
+	v.rebuild(a)
+	if len(v.vp.Rows) != 2 || v.shown != 2 {
+		t.Fatalf("rows = %d shown = %d, want 2/2", len(v.vp.Rows), v.shown)
+	}
+	if got := spansText(v.vp.Rows[0]); !strings.Contains(got, "#100") || !strings.Contains(got, "repo-a") {
+		t.Errorf("row = %q, want PR id and repo slug", got)
+	}
+	if pr := v.currentCrossPR(a); pr == nil || pr.ID != 100 {
+		t.Errorf("currentCrossPR = %+v", pr)
+	}
+
+	// The filter matches the repo slug too.
+	v.search.buf = []byte("repo-b")
+	v.rebuild(a)
+	if v.shown != 1 {
+		t.Fatalf("shown = %d, want 1", v.shown)
+	}
+	if pr := v.currentCrossPR(a); pr == nil || pr.ID != 200 {
+		t.Errorf("filtered currentCrossPR = %+v", pr)
+	}
+}
+
+func TestRepoPickerCycleModeWraps(t *testing.T) {
+	a := pickerTestApp()
+	a.repos = []Repository{}
+	a.myPRs.loaded, a.reviewPRs.loaded = true, true
+	v := &repoPickerView{}
+	v.cycleMode(a, 1)
+	if v.mode != pickerModeMine {
+		t.Fatalf("mode = %d, want mine", v.mode)
+	}
+	v.cycleMode(a, -1)
+	if v.mode != pickerModeRepos {
+		t.Fatalf("mode = %d, want repos", v.mode)
+	}
+	v.cycleMode(a, -1)
+	if v.mode != pickerModeReviewing {
+		t.Fatalf("mode = %d, want reviewing (wrap)", v.mode)
+	}
+}

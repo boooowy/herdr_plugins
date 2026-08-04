@@ -20,10 +20,11 @@ var helpByCtx = map[string]struct {
 }{
 	"picker": {"リポジトリ選択", []helpLine{
 		{"j / k / ↑ / ↓", "移動"},
-		{"Enter", "選択したリポジトリのPR一覧を開く"},
-		{"/", "絞り込み (リポジトリ名/説明、Esc で解除)"},
+		{"Tab / s / l / h / 1-3  (→/←)", "ビュー切替 (Repos / My PRs / Review)"},
+		{"Enter", "Repos: PR一覧を開く / My PRs・Review: PR詳細を開く"},
+		{"/", "絞り込み (Repos: 名前/説明、PR: 番号/リポジトリ/タイトル/著者/ブランチ)"},
 		{"C", "ローカルにclone (y で確定。既存checkoutがあれば関連付けのみ)"},
-		{"y", "clone URL をコピー"},
+		{"y", "Repos: clone URL / PR: PR URL をコピー"},
 	}},
 	"list": {"PR一覧", []helpLine{
 		{"j / k / ↑ / ↓", "移動"},

@@ -29,6 +29,11 @@ type Config struct {
 	CloneProtocol string   `toml:"clone_protocol"` // ssh | https
 	CloneArgs     []string `toml:"clone_args"`     // extra git clone flags, e.g. ["--filter=blob:none"]
 
+	// ReviewScanRepos bounds the picker's Review view: Bitbucket has no
+	// cross-repo "PRs I review" endpoint, so the N most recently updated
+	// repositories are queried individually.
+	ReviewScanRepos int `toml:"review_scan_repos"`
+
 	Placement        string            `toml:"placement"`        // tab | split | zoomed | overlay
 	ListTabTitle     string            `toml:"list_tab_title"`   // viewer tab label: {repo} {workspace}
 	ShowComments     bool              `toml:"show_comments"`    // inline comments in the diff view
@@ -69,6 +74,7 @@ func defaultConfig() Config {
 	return Config{
 		DefaultState:      "OPEN",
 		CloneProtocol:     "ssh",
+		ReviewScanRepos:   30,
 		Placement:         "tab",
 		ListTabTitle:      "PRs {repo}",
 		ShowComments:      true,
@@ -120,6 +126,9 @@ func loadConfig() Config {
 	}
 	if cfg.CloneProtocol != "https" {
 		cfg.CloneProtocol = defaultConfig().CloneProtocol
+	}
+	if cfg.ReviewScanRepos < 1 || cfg.ReviewScanRepos > 100 {
+		cfg.ReviewScanRepos = defaultConfig().ReviewScanRepos
 	}
 	switch cfg.Placement {
 	case "tab", "split", "zoomed", "overlay":

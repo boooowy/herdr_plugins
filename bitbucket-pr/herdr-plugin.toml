@@ -23,6 +23,16 @@ id = "open-picker"
 title = "Bitbucket PR: pick a repository"
 command = ["./bin/bitbucket-pr", "action", "picker"]
 
+[[actions]]
+id = "open-my-prs"
+title = "Bitbucket PR: my pull requests"
+command = ["./bin/bitbucket-pr", "action", "picker", "mine"]
+
+[[actions]]
+id = "open-review-prs"
+title = "Bitbucket PR: pull requests to review"
+command = ["./bin/bitbucket-pr", "action", "picker", "reviewing"]
+
 [[panes]]
 id = "viewer"
 title = "Bitbucket PR"

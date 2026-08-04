@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -9,18 +10,46 @@ import (
 const (
 	pickerSlugWidth    = 28
 	pickerUpdatedWidth = 10
+	pickerAuthorWidth  = 14
+	pickerPRRepoWidth  = 22
 	// pickerFillCap stops the filter's automatic page chase on huge
 	// workspaces; past this the user narrows the query instead.
 	pickerFillCap = 500
 )
 
+// pickerMode selects what the picker lists: the workspace's repositories,
+// the user's own open PRs, or open PRs waiting for the user's review.
+type pickerMode int
+
+const (
+	pickerModeRepos pickerMode = iota
+	pickerModeMine
+	pickerModeReviewing
+)
+
+var pickerModeLabels = []string{"Repos", "My PRs", "Review"}
+
+func pickerModeFromView(view string) pickerMode {
+	switch view {
+	case "mine":
+		return pickerModeMine
+	case "reviewing":
+		return pickerModeReviewing
+	default:
+		return pickerModeRepos
+	}
+}
+
 // repoPickerView is the workspace repository picker: search the list, pick a
 // repo, land in its PR list. It sits at the bottom of the view stack in
 // picker mode, so q/Esc from the PR list comes back here to switch repos.
+// Tab switches to the cross-repo PR dashboards (My PRs / Review), where
+// Enter goes straight to the PR detail.
 type repoPickerView struct {
 	vp     Viewport
 	search searchBox
 	shown  int
+	mode   pickerMode
 
 	// pendingClone is the repository awaiting the y/n clone confirmation
 	// (a copy — reloads may swap a.repos underneath); nil = none.
@@ -36,10 +65,130 @@ type repoPickerView struct {
 }
 
 func newRepoPickerView(a *app) *repoPickerView {
-	v := &repoPickerView{}
+	v := &repoPickerView{mode: pickerModeFromView(a.ctx.PickerView)}
 	v.scanRoots(a)
-	v.load(a, false)
+	v.ensureModeData(a)
 	return v
+}
+
+// ensureModeData loads the current mode's list unless it already has fresh
+// data this session.
+func (v *repoPickerView) ensureModeData(a *app) {
+	switch v.mode {
+	case pickerModeMine:
+		if !a.myPRs.loaded {
+			v.loadCrossPRs(a, &a.myPRs, "mine", false)
+			return
+		}
+	case pickerModeReviewing:
+		if !a.reviewPRs.loaded {
+			v.loadCrossPRs(a, &a.reviewPRs, "reviewing", false)
+			return
+		}
+	default:
+		if a.repos == nil {
+			v.load(a, false)
+			return
+		}
+	}
+	v.rebuild(a)
+}
+
+// cycleMode steps through Repos → My PRs → Review.
+func (v *repoPickerView) cycleMode(a *app, dir int) {
+	n := len(pickerModeLabels)
+	v.mode = pickerMode((int(v.mode) + dir + n) % n)
+	v.ensureModeData(a)
+}
+
+// crossList resolves the current mode's dashboard state (nil in Repos mode).
+func (v *repoPickerView) crossList(a *app) *crossPRList {
+	switch v.mode {
+	case pickerModeMine:
+		return &a.myPRs
+	case pickerModeReviewing:
+		return &a.reviewPRs
+	default:
+		return nil
+	}
+}
+
+// loadCrossPRs fetches one cross-repo dashboard (SWR: the disk cache paints
+// first). kind is "mine" or "reviewing".
+func (v *repoPickerView) loadCrossPRs(a *app, list *crossPRList, kind string, force bool) {
+	ws := a.ctx.Workspace
+	list.gen++
+	gen := list.gen
+	list.err, list.note = "", ""
+	if !force && list.prs == nil {
+		if cached := loadCrossPRCache(ws, kind); len(cached) > 0 {
+			list.prs = cached
+		}
+	}
+	// Capture what the Review scan needs up front; the work closure must not
+	// touch app state off the main goroutine.
+	scanLimit := a.cfg.ReviewScanRepos
+	slugs := make([]string, 0, scanLimit)
+	for i := range a.repos {
+		if len(slugs) == scanLimit {
+			break
+		}
+		slugs = append(slugs, a.repos[i].Slug)
+	}
+	client := a.client
+	a.fetch("cross prs "+kind, func() (func(*app), error) {
+		uuid, err := client.currentUserUUID()
+		var (
+			prs    []PullRequest
+			failed []string
+		)
+		if err == nil {
+			if kind == "mine" {
+				prs, err = client.listMyPRs(ws, uuid)
+			} else {
+				if len(slugs) == 0 {
+					// Launched straight into Review (open-review-prs): the
+					// repo list has not been fetched yet — get it here.
+					repos, _, listErr := client.listReposPage(client.listReposFirstURL(ws, ""))
+					if listErr != nil {
+						err = listErr
+					} else {
+						for i := range repos {
+							if len(slugs) == scanLimit {
+								break
+							}
+							slugs = append(slugs, repos[i].Slug)
+						}
+					}
+				}
+				if err == nil {
+					prs, failed, err = client.listReviewingPRs(ws, uuid, slugs)
+				}
+			}
+		}
+		return func(a *app) {
+			if list.gen != gen {
+				return
+			}
+			if err != nil {
+				list.err = err.Error()
+				a.status = list.err
+				v.rebuild(a)
+				return
+			}
+			if prs == nil {
+				prs = []PullRequest{}
+			}
+			list.prs = prs
+			list.loaded = true
+			if len(failed) > 0 {
+				list.note = fmt.Sprintf("%d件のリポジトリで取得に失敗", len(failed))
+			}
+			saveCrossPRCache(ws, kind, prs)
+			v.rebuild(a)
+		}, nil
+	})
+	v.rebuild(a)
 }
 
 // repoAt resolves a row Item to its repository: non-negative values index
@@ -155,8 +304,13 @@ func (v *repoPickerView) loadMore(a *app) {
 }
 
 // rebuild regenerates the rows from the fetched list, honouring the `/`
-// filter. Row.Item is the index into a.repos (negative: remoteResults).
+// filter. Row.Item is the index into a.repos (negative: remoteResults) in
+// Repos mode, or into the mode's crossPRList otherwise.
 func (v *repoPickerView) rebuild(a *app) {
+	if list := v.crossList(a); list != nil {
+		v.rebuildCrossPRs(a, list)
+		return
+	}
 	now := time.Now()
 	q := v.search.query()
 	rows := make([]Row, 0, len(a.repos)*2)
@@ -199,6 +353,61 @@ func (v *repoPickerView) rebuild(a *app) {
 	v.vp.Reset(rows)
 	v.fillFilter(a)
 	v.maybeRemoteSearch(a)
+}
+
+// rebuildCrossPRs renders one cross-repo PR dashboard: one line per PR with
+// its repository slug, since the list spans the whole workspace.
+func (v *repoPickerView) rebuildCrossPRs(a *app, list *crossPRList) {
+	now := time.Now()
+	q := v.search.query()
+	rows := make([]Row, 0, len(list.prs)+2)
+	v.shown = 0
+	if list.note != "" {
+		rows = append(rows, textRow(Span{" ⚠ " + list.note + "（r で再試行）", styleOutdated}))
+	}
+	titleW := pickerPRTitleWidth(a)
+	for i := range list.prs {
+		pr := &list.prs[i]
+		if !matchQuery(q, "#"+strconv.Itoa(pr.ID), pr.RepoSlug(), pr.Title, pr.Author.Name(),
+			pr.Source.Branch.Name, pr.Destination.Branch.Name) {
+			continue
+		}
+		v.shown++
+		rows = append(rows, row(RowPR, i, true,
+			Span{fmt.Sprintf(" #%-6d ", pr.ID), styleMeta},
+			Span{padRight(truncateWidth(pr.RepoSlug(), pickerPRRepoWidth), pickerPRRepoWidth), styleMeta},
+			Span{"  ", styleNone},
+			Span{padRight(truncateWidth(pr.Title, titleW), titleW), styleNone},
+			Span{"  " + padRight(truncateWidth(pr.Author.Name(), pickerAuthorWidth), pickerAuthorWidth), styleDim},
+			Span{"  " + padRight(truncateWidth(relTime(pr.UpdatedOn, now), pickerUpdatedWidth), pickerUpdatedWidth), styleDim},
+		))
+	}
+	if v.shown == 0 {
+		switch {
+		case a.loading > 0 && !list.loaded:
+			rows = append(rows, textRow(Span{" 読み込み中…", styleDim}))
+			if v.mode == pickerModeReviewing {
+				rows = append(rows, textRow(Span{fmt.Sprintf(" 更新順上位%d件のリポジトリを問い合わせています", a.cfg.ReviewScanRepos), styleDim}))
+			}
+		case list.err != "":
+			rows = append(rows, textRow(Span{" 取得に失敗しました（r で再読込）: " + list.err, styleDim}))
+		case q != "":
+			rows = append(rows, textRow(Span{" (一致する PR はありません)", styleDim}))
+		case v.mode == pickerModeMine:
+			rows = append(rows, textRow(Span{" (自分が作成したOPENのPRはありません)", styleDim}))
+		default:
+			rows = append(rows, textRow(Span{" (レビュー待ちのPRはありません)", styleDim}))
+		}
+	}
+	v.vp.Reset(rows)
+}
+
+func pickerPRTitleWidth(a *app) int {
+	w := a.w - 1 - 8 - pickerPRRepoWidth - 2 - 2 - pickerAuthorWidth - 2 - pickerUpdatedWidth - 1
+	if w < 1 {
+		w = 1
+	}
+	return w
 }
 
 // repoRow is one repository line. The two leading mark cells show the local
@@ -279,20 +488,35 @@ func pickerDescWidth(a *app) int {
 }
 
 func (v *repoPickerView) render(a *app, s *Screen) {
-	x := s.WriteString(1, 0, fmt.Sprintf("Bitbucket リポジトリ — %s   ", a.ctx.Workspace), styleTitle, a.w)
-	q := v.search.query()
-	count := fmt.Sprintf("%d件", len(a.repos))
-	if q != "" {
-		count = fmt.Sprintf("%d/%d件", v.shown, len(a.repos))
+	x := s.WriteString(1, 0, fmt.Sprintf("Bitbucket — %s   ", a.ctx.Workspace), styleTitle, a.w)
+	for i, label := range pickerModeLabels {
+		style := styleTabInactive
+		if pickerMode(i) == v.mode {
+			style = styleTabActive
+		}
+		x = s.WriteString(x, 0, label, style, a.w)
+		x = s.WriteString(x, 0, "  ", styleNone, a.w)
 	}
-	if a.reposNext != "" {
+	q := v.search.query()
+	total := len(a.repos)
+	more := a.reposNext != ""
+	if list := v.crossList(a); list != nil {
+		total, more = len(list.prs), false
+	}
+	count := fmt.Sprintf("%d件", total)
+	if q != "" {
+		count = fmt.Sprintf("%d/%d件", v.shown, total)
+	}
+	if more {
 		count += "+"
 	}
 	x = s.WriteString(x, 0, count, styleDim, a.w)
 	if q != "" {
 		x = s.WriteString(x, 0, "  /"+q, styleMeta, a.w)
 	}
-	v.paintCursorPath(a, s, x)
+	if v.mode == pickerModeRepos {
+		v.paintCursorPath(a, s, x)
+	}
 	paintSeparator(s, 1, a.w)
 	v.vp.Paint(s, a.contentRect())
 }
@@ -379,6 +603,14 @@ func (v *repoPickerView) handle(a *app, k Key) {
 	switch {
 	case isKey(k, '/'):
 		v.search.open()
+	case k.Kind == KeyTab || isKey(k, 's') || isKey(k, 'l') || k.Kind == KeyRight ||
+		(k.Kind == KeyRune && k.R == '\t'):
+		v.cycleMode(a, 1)
+	case k.Kind == KeyShiftTab || isKey(k, 'h') || k.Kind == KeyLeft:
+		v.cycleMode(a, -1)
+	case isKey(k, '1') || isKey(k, '2') || isKey(k, '3'):
+		v.mode = pickerMode(k.R - '1')
+		v.ensureModeData(a)
 	case isKey(k, 'j') || k.Kind == KeyDown:
 		v.vp.MoveCursor(1)
 	case isKey(k, 'k') || k.Kind == KeyUp:
@@ -399,31 +631,120 @@ func (v *repoPickerView) handle(a *app, k Key) {
 	case k.Kind == KeyCtrl && k.R == 'u':
 		v.vp.Scroll(-v.vp.H / 2)
 	case k.Kind == KeyEnter:
-		if r := v.currentRepo(a); r != nil {
+		if pr := v.currentCrossPR(a); pr != nil {
+			v.openCrossPR(a, *pr)
+		} else if r := v.currentRepo(a); r != nil {
 			v.openRepo(a, r)
 		}
 	case isKey(k, 'C'):
-		if r := v.currentRepo(a); r != nil {
+		if pr := v.currentCrossPR(a); pr != nil {
+			v.beginCloneBySlug(a, pr.RepoSlug())
+		} else if r := v.currentRepo(a); r != nil {
 			v.beginClone(a, r)
 		}
 	case isKey(k, 'r') || isKey(k, 'R'):
-		v.remoteQuery, v.remoteResults = "", nil
-		v.load(a, true)
-		v.scanRoots(a)
+		if list := v.crossList(a); list != nil {
+			kind := "mine"
+			if v.mode == pickerModeReviewing {
+				kind = "reviewing"
+			}
+			v.loadCrossPRs(a, list, kind, true)
+		} else {
+			v.remoteQuery, v.remoteResults = "", nil
+			v.load(a, true)
+			v.scanRoots(a)
+		}
 	case isKey(k, 'o'):
-		if r := v.currentRepo(a); r != nil {
+		if pr := v.currentCrossPR(a); pr != nil {
+			openInBrowser(a, pr.WebURL())
+		} else if r := v.currentRepo(a); r != nil {
 			openInBrowser(a, r.WebURL())
 		}
 	case isKey(k, 'y'):
-		if r := v.currentRepo(a); r != nil {
+		if pr := v.currentCrossPR(a); pr != nil {
+			copyToClipboard(a, pr.WebURL())
+		} else if r := v.currentRepo(a); r != nil {
 			copyToClipboard(a, r.CloneURL(a.cfg.CloneProtocol))
 		}
 	case isKey(k, '?'):
 		a.openHelp("picker")
 	}
-	if a.reposNext != "" && v.vp.Cursor >= len(v.vp.Rows)-10 {
+	if v.mode == pickerModeRepos && a.reposNext != "" && v.vp.Cursor >= len(v.vp.Rows)-10 {
 		v.loadMore(a)
 	}
+}
+
+// currentCrossPR resolves the PR under the cursor in My PRs / Review mode
+// (nil in Repos mode).
+func (v *repoPickerView) currentCrossPR(a *app) *PullRequest {
+	list := v.crossList(a)
+	if list == nil {
+		return nil
+	}
+	r := v.vp.Current()
+	if r == nil || r.Kind != RowPR {
+		return nil
+	}
+	if i := r.Item.(int); i >= 0 && i < len(list.prs) {
+		return &list.prs[i]
+	}
+	return nil
+}
+
+// openCrossPR switches the app context to the PR's repository and opens its
+// detail directly (q/Esc comes back to this dashboard).
+func (v *repoPickerView) openCrossPR(a *app, pr PullRequest) {
+	slug := pr.RepoSlug()
+	if slug == "" {
+		a.status = "PRのリポジトリを特定できません"
+		return
+	}
+	ws := a.ctx.Workspace
+	key := repoDirKey(ws, slug)
+	dir := a.localDirs[key]
+	if dir != "" {
+		if ws2, repo2, err := repoFromDir(dir); err != nil || ws2 != ws || repo2 != slug {
+			forgetRepoDir(ws, slug)
+			delete(a.localDirs, key)
+			dir = ""
+		}
+	}
+	if a.ctx.Repo != slug {
+		resetRepoState(a)
+		a.ctx.Repo = slug
+	}
+	a.ctx.RepoDir = dir
+	a.renameViewerTab(renderListTabTitle(a.cfg, ws, slug))
+	if pr.State == "" {
+		pr.State = "OPEN"
+	}
+	a.push(newDetailView(a, pr.ID, &pr))
+}
+
+// beginCloneBySlug opens the clone confirmation for a repository known only
+// by slug (a PR row): reuse the fetched repo list when possible, otherwise
+// one API call fills in the clone links.
+func (v *repoPickerView) beginCloneBySlug(a *app, slug string) {
+	if slug == "" {
+		return
+	}
+	for i := range a.repos {
+		if a.repos[i].Slug == slug {
+			v.beginClone(a, &a.repos[i])
+			return
+		}
+	}
+	ws := a.ctx.Workspace
+	a.fetch("repo "+slug, func() (func(*app), error) {
+		r, err := a.client.getRepo(ws, slug)
+		return func(a *app) {
+			if err != nil {
+				a.status = "リポジトリ情報の取得に失敗: " + err.Error()
+				return
+			}
+			v.beginClone(a, r)
+		}, nil
+	})
 }
 
 // currentRepo resolves the repository under the cursor.
@@ -496,8 +817,11 @@ func (v *repoPickerView) footer(a *app) string {
 		return v.search.prompt()
 	}
 	if q := v.search.query(); q != "" {
-		return "j/k:移動  Enter:PR一覧  /:" + q + "  q/Esc:絞込解除  C:clone  r:再読込"
+		return "j/k:移動  Enter:開く  /:" + q + "  q/Esc:絞込解除  C:clone  r:再読込"
 	}
-	return "j/k:移動  Enter:PR一覧  /:検索  C:clone  o:ブラウザ  y:clone URL  r:再読込  q:終了"
+	if v.mode == pickerModeRepos {
+		return "j/k:移動  Enter:PR一覧  Tab:ビュー切替  /:検索  C:clone  o:ブラウザ  y:clone URL  r:再読込  q:終了"
+	}
+	return "j/k:移動  Enter:PR詳細  Tab:ビュー切替  /:検索  C:clone  o:ブラウザ  y:URL  r:再読込  q:終了"
 }
 

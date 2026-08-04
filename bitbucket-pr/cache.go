@@ -86,6 +86,81 @@ func saveRepoCache(ws string, repos []Repository) {
 	}
 }
 
+// Cross-repo PR list cache (My PRs / Review), same stale-while-revalidate
+// idea. kind is "mine" or "reviewing".
+
+func crossPRCachePath(ws, kind string) string {
+	return filepath.Join(stateDir(), "cache", "cross-prs-"+ws+"__"+kind+".json")
+}
+
+func loadCrossPRCache(ws, kind string) []PullRequest {
+	data, err := os.ReadFile(crossPRCachePath(ws, kind))
+	if err != nil {
+		return nil
+	}
+	var prs []PullRequest
+	if err := json.Unmarshal(data, &prs); err != nil {
+		debugf("cache: unmarshal %s: %v", crossPRCachePath(ws, kind), err)
+		return nil
+	}
+	return prs
+}
+
+func saveCrossPRCache(ws, kind string, prs []PullRequest) {
+	path := crossPRCachePath(ws, kind)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		debugf("cache: mkdir: %v", err)
+		return
+	}
+	data, err := json.Marshal(prs)
+	if err != nil {
+		debugf("cache: marshal: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		debugf("cache: write: %v", err)
+	}
+}
+
+// The authenticated account's UUID, keyed by email so switching accounts
+// refetches instead of reusing a stale identity.
+
+type userUUIDCache struct {
+	Email string `json:"email"`
+	UUID  string `json:"uuid"`
+}
+
+func userUUIDCachePath() string {
+	return filepath.Join(stateDir(), "cache", "user-uuid.json")
+}
+
+func loadUserUUIDCache(email string) string {
+	data, err := os.ReadFile(userUUIDCachePath())
+	if err != nil {
+		return ""
+	}
+	var c userUUIDCache
+	if err := json.Unmarshal(data, &c); err != nil || c.Email != email {
+		return ""
+	}
+	return c.UUID
+}
+
+func saveUserUUIDCache(email, uuid string) {
+	path := userUUIDCachePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		debugf("cache: mkdir: %v", err)
+		return
+	}
+	data, err := json.Marshal(userUUIDCache{Email: email, UUID: uuid})
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		debugf("cache: write: %v", err)
+	}
+}
+
 // mutatePRCache updates one PR in the cached first page. Returning false from
 // mutate removes it (used when an OPEN PR is declined). Missing entries are
 // left alone because their correct page position is unknown.

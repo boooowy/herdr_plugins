@@ -35,6 +35,8 @@ func (a Account) Name() string {
 func (a Account) AvatarURL() string { return a.Links.Avatar.Href }
 
 // PRRef is one endpoint of a pull request (source or destination).
+// Repository is only requested by the cross-repo views (My PRs / Review),
+// where the owning repo is not implied by the endpoint.
 type PRRef struct {
 	Branch struct {
 		Name string `json:"name"`
@@ -42,6 +44,9 @@ type PRRef struct {
 	Commit struct {
 		Hash string `json:"hash"`
 	} `json:"commit"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
 }
 
 // Participant is a reviewer/participant entry on the PR detail payload.
@@ -141,6 +146,16 @@ func (pr *PullRequest) Description() string {
 // WebURL returns the PR's browser URL.
 func (pr *PullRequest) WebURL() string {
 	return pr.Links.HTML.Href
+}
+
+// RepoSlug returns the owning repository's slug (cross-repo payloads only;
+// "" when the repository field was not requested).
+func (pr *PullRequest) RepoSlug() string {
+	fn := pr.Destination.Repository.FullName
+	if i := strings.IndexByte(fn, '/'); i >= 0 {
+		return fn[i+1:]
+	}
+	return fn
 }
 
 // DiffStatEntry is one file's change summary from the diffstat endpoint.

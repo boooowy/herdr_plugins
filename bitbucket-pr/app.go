@@ -69,6 +69,10 @@ type app struct {
 	cloneInFlight    map[string]bool   // full_name → a clone is running
 	viewerTabID      string            // viewer pane's own tab (renamed on repo selection); "" = unknown
 
+	// Cross-repo PR dashboards (picker's My PRs / Review modes).
+	myPRs     crossPRList
+	reviewPRs crossPRList
+
 	difftoolPanes map[int]paneRef // PR id → its external diff tool tab
 
 	// pendingDifftool queues an Enter/D pressed while the PR diff was
@@ -80,6 +84,16 @@ type app struct {
 type difftoolRequest struct {
 	prID  int
 	focus string
+}
+
+// crossPRList is one cross-repo PR dashboard (My PRs or Review): the fetched
+// list plus the usual generation/staleness bookkeeping.
+type crossPRList struct {
+	prs    []PullRequest
+	err    string
+	note   string // partial-failure warning (some repos unreachable)
+	gen    int    // bumped on reload to drop stale fetches
+	loaded bool   // a fresh fetch completed this session (cache alone doesn't count)
 }
 
 // keyGrabber is a view that is accepting text input and must therefore see
