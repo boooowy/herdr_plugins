@@ -362,6 +362,52 @@ func (v *detailView) memoContext(a *app) (reviewMemo, string) {
 	return newPRMemo(""), "PR全体へのメモ"
 }
 
+// cursorFilePath resolves the file the cursor sits on, so D can hand the
+// diff tool a focus file instead of dumping the PR in natural order. It
+// follows the same anchoring rules as memoContext above — Files: the row's
+// file, Outline: the symbol's (or dir/file row's) path, Comments: the file
+// header row's file or the thread's file — and returns "" where there is no
+// file context (Overview, Memo, general threads), which means natural order.
+func (v *detailView) cursorFilePath(a *app) string {
+	d := a.detailFor(v.prID)
+	switch v.tab {
+	case tabFiles:
+		if r := v.vp[tabFiles].Current(); r != nil && r.Kind == RowFile {
+			if i, ok := r.Item.(int); ok && i >= 0 && i < len(d.diffstat) {
+				return d.diffstat[i].Path()
+			}
+		}
+	case tabOutline:
+		if s := v.currentOutlineSymbol(a); s != nil {
+			if s.Path != "" {
+				return s.Path
+			}
+			return s.OldPath
+		}
+		if r := v.vp[tabOutline].Current(); r != nil {
+			if ref, ok := r.Item.(outlineRowRef); ok {
+				return ref.Path
+			}
+		}
+	case tabComments:
+		if r := v.vp[tabComments].Current(); r != nil {
+			if g, ok := r.Item.(cmtGroup); ok {
+				return g.Path
+			}
+		}
+		if t, ok := v.currentThread(); ok && t.Root.Inline != nil {
+			return t.Root.Inline.Path
+		}
+	case tabMemo:
+		if id, ok := v.currentMemoID(); ok {
+			if m := a.memosFor(v.prID).byID(id); m != nil {
+				return m.Path
+			}
+		}
+	}
+	return ""
+}
+
 // openMemoInDiff pushes the built-in diff view scrolled to the memo's
 // anchor line (Enter on the Memo tab).
 func (v *detailView) openMemoInDiff(a *app, id int64) {
@@ -1384,7 +1430,7 @@ func (v *detailView) handle(a *app, k Key) {
 			}
 		}
 	case isKey(k, 'D'):
-		openInDiffTool(a, v.prID, "")
+		openInDiffTool(a, v.prID, v.cursorFilePath(a))
 	case isKey(k, '?'):
 		a.openHelp("detail")
 	}

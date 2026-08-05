@@ -49,19 +49,26 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		a.status = "diff を読み込み中 — 完了後に diff ツールを開きます"
 		return
 	}
+	t0 := time.Now()
 	path := filepath.Join(stateDir(), fmt.Sprintf("pr-%d.patch", prID))
-	if err := os.WriteFile(path, []byte(reorderPatch(d.diffText, focusPath)), 0o600); err != nil {
+	patch := reorderPatch(d.diffText, focusPath)
+	t1 := time.Now()
+	if err := os.WriteFile(path, []byte(patch), 0o600); err != nil {
 		a.status = "patch ファイルを書けません: " + err.Error()
 		return
 	}
+	t2 := time.Now()
 	// Existing inline comments ride along as hunk annotations ({ctx} in
-	// diff_tool); the marker file lets the pane signal posted draft notes
-	// back so the viewer refreshes its comments.
+	// diff_tool), and the same file fixes the display order (see
+	// buildAgentContext); the marker file lets the pane signal posted draft
+	// notes back so the viewer refreshes its comments.
 	ctxPath := filepath.Join(stateDir(), fmt.Sprintf("pr-%d-ctx.json", prID))
-	if err := os.WriteFile(ctxPath, buildAgentContext(d.comments, time.Now()), 0o600); err != nil {
+	if err := os.WriteFile(ctxPath, buildAgentContext(d.comments, d.files, focusPath, time.Now()), 0o600); err != nil {
 		debugf("difftool: agent context: %v", err)
 		ctxPath = ""
 	}
+	debugf("difftool: prep reorder=%s patch=%s ctx=%s (%d files, %d bytes)",
+		t1.Sub(t0), t2.Sub(t1), time.Since(t2), len(d.files), len(patch))
 	marker := filepath.Join(stateDir(), fmt.Sprintf("dtpost-%d-%d", prID, time.Now().UnixNano()))
 	memoImport := filepath.Join(stateDir(), fmt.Sprintf("dtmemo-%d-%d.json", prID, time.Now().UnixNano()))
 
@@ -84,11 +91,13 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		if placement == "popup" {
 			width, height = a.cfg.DifftoolWidth, a.cfg.DifftoolHeight
 		}
+		open := time.Now()
 		if _, err := a.herdr.pluginPaneOpen(pluginID, "difftool", placement, true, env, width, height); err != nil {
 			a.status = "diff ツールを開けません: " + err.Error()
 			return
 		}
-		debugf("difftool: opened %s for pr %d", placement, prID)
+		debugf("difftool: opened %s for pr %d (pane.open=%s, total=%s)",
+			placement, prID, time.Since(open), time.Since(t0))
 		go watchPostMarker(a, prID, marker)
 		go watchMemoImport(a, prID, memoImport)
 		return
@@ -113,11 +122,13 @@ func openInDiffTool(a *app, prID int, focusPath string) {
 		delete(a.difftoolPanes, prID)
 	}
 
+	open := time.Now()
 	pane, err := a.herdr.pluginPaneOpen(pluginID, "difftool", "tab", true, env, "", "")
 	if err != nil {
 		a.status = "diff ツールのペインを開けません: " + err.Error()
 		return
 	}
+	debugf("difftool: pane.open=%s (total=%s)", time.Since(open), time.Since(t0))
 	a.difftoolPanes[prID] = paneRef{PaneID: pane.PaneID, TabID: pane.TabID, Focus: focusPath}
 	go watchPostMarker(a, prID, marker)
 	go watchMemoImport(a, prID, memoImport)

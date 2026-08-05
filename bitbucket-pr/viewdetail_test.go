@@ -282,6 +282,48 @@ func masterViewFixture(t *testing.T) (*app, *detailView) {
 	return a, v
 }
 
+// D hands the diff tool the file under the cursor, so hunk opens on it
+// instead of dumping the PR in natural order.
+func TestCursorFilePath(t *testing.T) {
+	a, v := masterViewFixture(t)
+
+	// Thread on b.go — the second commented file, so this is exactly the case
+	// that used to open on a.go.
+	moveCursorTo(t, v, 3)
+	if got := v.cursorFilePath(a); got != "b.go" {
+		t.Errorf("thread on b.go: focus = %q, want b.go", got)
+	}
+
+	// A reply resolves through its root thread's file.
+	moveCursorTo(t, v, 4)
+	if got := v.cursorFilePath(a); got != "a.go" {
+		t.Errorf("reply on a.go thread: focus = %q, want a.go", got)
+	}
+
+	// General thread has no file context — natural order.
+	moveCursorTo(t, v, 1)
+	if got := v.cursorFilePath(a); got != "" {
+		t.Errorf("general thread: focus = %q, want empty", got)
+	}
+
+	// File header rows anchor to their own file.
+	for i, r := range v.vp[tabComments].Rows {
+		if g, ok := r.Item.(cmtGroup); ok && g.Path == "b.go" {
+			v.vp[tabComments].Cursor = i
+			if got := v.cursorFilePath(a); got != "b.go" {
+				t.Errorf("b.go header row: focus = %q, want b.go", got)
+			}
+			break
+		}
+	}
+
+	// Overview carries no file context at all.
+	v.tab = tabOverview
+	if got := v.cursorFilePath(a); got != "" {
+		t.Errorf("overview: focus = %q, want empty", got)
+	}
+}
+
 func moveCursorTo(t *testing.T, v *detailView, id int) {
 	t.Helper()
 	for i, r := range v.vp[tabComments].Rows {

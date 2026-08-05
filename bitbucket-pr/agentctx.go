@@ -33,19 +33,37 @@ type agentCtxNote struct {
 // buildAgentContext renders the PR's inline comment threads as hunk
 // agent-context JSON. Outdated threads are skipped (their lines no longer
 // exist in the diff); replies join the rationale as "↳ author: body" lines.
-func buildAgentContext(comments []Comment, now time.Time) []byte {
+//
+// files/focusPath also decide the display order: hunk sorts the changeset by
+// this array (its orderDiffFiles ranks each diff file by its index here, with
+// unlisted files last), so the array has to carry *every* file of the patch —
+// the focused one first, the rest in patch order — or hunk's ordering would
+// fight the patch reorderPatch already produced.
+func buildAgentContext(comments []Comment, files []FileDiff, focusPath string, now time.Time) []byte {
 	byFile := inlineThreadsByFile(comments)
 	ctx := agentContext{Version: 1, Files: []agentCtxFile{}}
-	for _, path := range orderedInlinePaths(byFile) {
-		var notes []agentCtxNote
+	seen := map[string]bool{}
+	add := func(path string) {
+		if path == "" || seen[path] {
+			return
+		}
+		seen[path] = true
+		notes := []agentCtxNote{}
 		for _, t := range byFile[path] {
 			if n, ok := ctxNote(t, now); ok {
 				notes = append(notes, n)
 			}
 		}
-		if len(notes) > 0 {
-			ctx.Files = append(ctx.Files, agentCtxFile{Path: path, Annotations: notes})
-		}
+		ctx.Files = append(ctx.Files, agentCtxFile{Path: path, Annotations: notes})
+	}
+	add(displayPathFor(files, focusPath))
+	for i := range files {
+		add(files[i].Path())
+	}
+	// Threads on files the patch does not carry (Bitbucket truncates large
+	// diffs) still ride along so their annotations are not dropped.
+	for _, path := range orderedInlinePaths(byFile) {
+		add(path)
 	}
 	data, err := json.Marshal(ctx)
 	if err != nil {
@@ -53,6 +71,24 @@ func buildAgentContext(comments []Comment, now time.Time) []byte {
 		return []byte(`{"version":1,"files":[]}`)
 	}
 	return data
+}
+
+// displayPathFor maps a path to the one hunk displays (the new side), so a
+// rename's old path does not add a second entry for the same file. Paths the
+// patch does not carry come back unchanged.
+func displayPathFor(files []FileDiff, path string) string {
+	if path == "" {
+		return ""
+	}
+	for i := range files {
+		if files[i].Path() == path {
+			return path
+		}
+		if files[i].OldPath == path && files[i].Path() != "" {
+			return files[i].Path()
+		}
+	}
+	return path
 }
 
 func ctxNote(t CommentThread, now time.Time) (agentCtxNote, bool) {

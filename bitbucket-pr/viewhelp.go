@@ -52,7 +52,7 @@ var helpByCtx = map[string]struct {
 		{"m / M", "メモ追加 (Files: 選択ファイル / Outline: 選択シンボル / Comments: 選択スレッドの行 / 他: PR全体) / Memoタブへ"},
 		{"d / e", "Memo: メモを削除 (y で確定) / エディタで再編集"},
 		{"a / A / X", "PRを承認 / 自分の承認取消 / Decline (yで確定、OPENのみ)"},
-		{"D", "PR全体のdiffをdiffツールで開く"},
+		{"D", "PR全体のdiffをdiffツールで開く (カーソルのファイルを先頭に)"},
 		{"y", "PR URL をコピー (Memoタブ: 全メモを Markdown でコピー)"},
 		{"b", "source branch 名をコピー"},
 	}},
@@ -69,7 +69,7 @@ var helpByCtx = map[string]struct {
 		{"m", "レビューメモを追加（カーソル行 / v 選択範囲。ローカル保存、投稿されない）"},
 		{"M", "メモ一覧 (詳細の Memo タブ) へ"},
 		{"Ctrl-f / Ctrl-b", "1ページスクロール"},
-		{"D", "PR全体のdiffをdiffツールで開く"},
+		{"D", "PR全体のdiffをdiffツールで開く (表示中のファイルを先頭に)"},
 	}},
 }
 
